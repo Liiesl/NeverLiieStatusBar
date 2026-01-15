@@ -137,9 +137,10 @@ class BasePopupWidget(QWidget):
 
 # --- SHARED UI CONTROLS ---
 
-class ModernToggle(QWidget):
+class ActionTile(QWidget):
     """
-    Looks like Windows 11 Action Tile:
+    (Formerly ModernToggle)
+    Large rectangular tile.
     [ Icon ] 
     Label
     """
@@ -186,6 +187,52 @@ class ModernToggle(QWidget):
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setStyleSheet(f"color: {TEXT_WHITE}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(lbl)
+
+class CompactToggleBtn(QPushButton):
+    """
+    New: A small, button-sized toggle (like a tool button).
+    Icon only (or small text), changes color when active.
+    """
+    def __init__(self, icon_name, tooltip_text="", size=36, active=False, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(active)
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tooltip_text)
+        
+        # Set Icon
+        self.icon_active = qta.icon(icon_name, color="black")
+        self.icon_inactive = qta.icon(icon_name, color="white")
+        self.setIcon(self.icon_active if active else self.icon_inactive)
+        self.setIconSize(QSize(18, 18))
+
+        # Handle icon color switching manually or via stylesheet logic
+        self.toggled.connect(self._update_icon)
+
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {TILE_INACTIVE};
+                border: 1px solid #555;
+                border-radius: {size//2 - 4}px; 
+            }}
+            QPushButton:hover {{
+                background-color: {TILE_HOVER};
+            }}
+            QPushButton:checked {{
+                background-color: {ACCENT_COLOR};
+                border: 1px solid {ACCENT_COLOR};
+            }}
+            QPushButton:checked:hover {{
+                background-color: #50b0e0;
+            }}
+        """)
+
+    def _update_icon(self, checked):
+        if checked:
+            self.setIcon(self.icon_active)
+        else:
+            self.setIcon(self.icon_inactive)
 
 class ModernSlider(QWidget):
     """

@@ -2,7 +2,7 @@ import qtawesome as qta
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QLabel, QGridLayout)
 from PySide6.QtCore import Qt
-from .common import (ClickableLabel, ModernSlider, ModernToggle, 
+from .common import (ClickableLabel, ModernSlider, ActionTile, CompactToggleBtn,
                      TEXT_WHITE, TEXT_SUB)
 
 class SettingsComponent(ClickableLabel):
@@ -24,22 +24,22 @@ class QuickSettingsUI(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(20)
 
-        # 1. TOP SECTION: Toggles (Grid)
+        # 1. TOP SECTION: Action Tiles (Grid)
         grid_layout = QGridLayout()
         grid_layout.setSpacing(10)
 
         # Row 0: Connectivity
-        self.tile_wifi = ModernToggle("Wi-Fi", "Connected", "fa5s.wifi", active=True)
+        self.tile_wifi = ActionTile("Wi-Fi", "Connected", "fa5s.wifi", active=True)
         grid_layout.addWidget(self.tile_wifi, 0, 0)
 
-        self.tile_bt = ModernToggle("Bluetooth", "On", "fa5b.bluetooth-b", active=True)
+        self.tile_bt = ActionTile("Bluetooth", "On", "fa5b.bluetooth-b", active=True)
         grid_layout.addWidget(self.tile_bt, 0, 1)
 
         # Row 1: Utils
-        self.tile_airplane = ModernToggle("Airplane", "Off", "fa5s.plane", active=False)
+        self.tile_airplane = ActionTile("Airplane", "Off", "fa5s.plane", active=False)
         grid_layout.addWidget(self.tile_airplane, 1, 0)
 
-        self.tile_saver = ModernToggle("Battery Saver", "Off", "fa5s.leaf", active=False)
+        self.tile_saver = ActionTile("Battery Saver", "Off", "fa5s.leaf", active=False)
         grid_layout.addWidget(self.tile_saver, 1, 1)
         
         layout.addLayout(grid_layout)
@@ -84,7 +84,8 @@ class QuickSettingsUI(QWidget):
         footer.setContentsMargins(0, 0, 0, 0) 
         footer.setSpacing(5)
 
-        # Helper to create consistent footer buttons
+        # Example usage of creating a simple footer button vs the new toggle class
+        # (Keeping the helper here for simple triggers, but you can swap to CompactToggleBtn if needed)
         def create_footer_btn(icon_name, tooltip):
             btn = QPushButton()
             btn.setIcon(qta.icon(icon_name, color=TEXT_WHITE))
@@ -97,12 +98,14 @@ class QuickSettingsUI(QWidget):
             """)
             return btn
 
-        # Power Buttons
+        # Power Buttons (Triggers)
         self.btn_lock = create_footer_btn("fa5s.lock", "Lock")
         self.btn_sleep = create_footer_btn("fa5s.moon", "Sleep")
         self.btn_restart = create_footer_btn("fa5s.redo-alt", "Restart")
         self.btn_shutdown = create_footer_btn("fa5s.power-off", "Shutdown")
-        self.btn_disable = create_footer_btn("fa5s.eye-slash", "Disable Topbar")
+        
+        # Example: Using the NEW CompactToggleBtn for the "Disable" feature (since it's a state)
+        self.btn_disable = CompactToggleBtn("fa5s.eye-slash", "Disable Topbar", size=30)
         
         footer.addWidget(self.btn_lock)
         footer.addWidget(self.btn_sleep)
