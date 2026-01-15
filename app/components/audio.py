@@ -6,8 +6,8 @@ from .common import ClickableLabel
 
 class AudioComponent(ClickableLabel):
     def __init__(self, settings, parent=None):
-        super().__init__("Vol: --", parent)
-        self.settings = settings
+        # Pass settings so ClickableLabel can style itself
+        super().__init__("Vol: --", parent, settings=settings)
         self.volume_interface = None
         
         self.setup_audio_interface()
@@ -36,11 +36,20 @@ class AudioComponent(ClickableLabel):
             try:
                 vol = int(self.volume_interface.GetMasterVolumeLevelScalar() * 100)
                 muted = self.volume_interface.GetMute()
-                icon = "🔇" if muted else "♪"
-                self.setText(f"{icon} {vol}%")
+                
+                # MDI Icon Selection
+                icon_name = "mdi.volume-high"
+                if muted or vol == 0:
+                    icon_name = "mdi.volume-off"
+                elif vol < 30:
+                    icon_name = "mdi.volume-low"
+                elif vol < 70:
+                    icon_name = "mdi.volume-medium"
+                
+                self.setIcon(icon_name)
+                self.setText(f"{vol}%")
             except:
-                pass
+                self.setText("--")
 
     def get_popup_content(self):
-        # Return title, body text for the popup
         return "Audio", "Master Volume Control (System)"

@@ -1,8 +1,9 @@
 import win32gui
 import win32con
+import time
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QHBoxLayout, 
                                QSpacerItem, QSizePolicy)
-from PySide6.QtCore import Qt, QTimer, QRect, QEasingCurve, Slot, QPropertyAnimation
+from PySide6.QtCore import Qt, QTimer, QRect, QEasingCurve, QPropertyAnimation, QPoint
 from PySide6.QtGui import QCursor
 
 from .components.common import BasePopupWidget
@@ -10,6 +11,7 @@ from .components.clock import ClockComponent
 from .components.audio import AudioComponent
 from .components.network import NetworkComponent
 from .components.battery import BatteryComponent
+from .components.settings_menu import SettingsComponent
 
 class SystemStatusBar(QWidget):
     def __init__(self, settings):
@@ -19,6 +21,8 @@ class SystemStatusBar(QWidget):
         # State
         self.is_visible = True
         self.active_popup = None
+        self.edge_dwell_start = None  
+        
         self.hide_timer = QTimer(self)
         self.hide_timer.setSingleShot(True)
         self.hide_timer.timeout.connect(self.execute_hide)
@@ -52,6 +56,7 @@ class SystemStatusBar(QWidget):
         self.comp_audio = AudioComponent(self.cfg)
         self.comp_net = NetworkComponent(self.cfg)
         self.comp_bat = BatteryComponent(self.cfg)
+        self.comp_settings = SettingsComponent(self.cfg)
         
         # Menu Label (Static)
         lbl_menu = QLabel("⚡ System")
@@ -61,6 +66,7 @@ class SystemStatusBar(QWidget):
         self.comp_audio.clicked.connect(lambda: self.handle_popup(self.comp_audio))
         self.comp_net.clicked.connect(lambda: self.handle_popup(self.comp_net))
         self.comp_bat.clicked.connect(lambda: self.handle_popup(self.comp_bat))
+        self.comp_settings.clicked.connect(lambda: self.handle_popup(self.comp_settings))
 
         # Add to Layout
         inner.addWidget(lbl_menu)
@@ -68,10 +74,9 @@ class SystemStatusBar(QWidget):
         inner.addWidget(self.comp_clock)
         inner.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
         inner.addWidget(self.comp_audio)
-        inner.addWidget(self.create_separator())
         inner.addWidget(self.comp_net)
-        inner.addWidget(self.create_separator())
         inner.addWidget(self.comp_bat)
+        inner.addWidget(self.comp_settings)
 
         layout.addWidget(self.container)
         self.apply_style()
@@ -81,11 +86,6 @@ class SystemStatusBar(QWidget):
         self.anim.setDuration(self.cfg.anim_duration)
         self.anim.setEasingCurve(QEasingCurve.OutCubic)
         self.show()
-
-    def create_separator(self):
-        sep = QLabel("|")
-        sep.setStyleSheet(f"color: {self.cfg.text_color}; padding: 0 5px;")
-        return sep
 
     def apply_style(self):
         self.container.setStyleSheet(f"""
@@ -111,25 +111,70 @@ class SystemStatusBar(QWidget):
         """)
 
     def handle_popup(self, component):
-        """Standardized handler for component popups"""
-        title, content = component.get_popup_content()
-        
+        """Calculates precise position relative to component and animates."""
         if self.active_popup: 
+            # If we click the same component, close it
+            # (Requires tracking which component opened the popup, simplified here just to close)
             self.active_popup.close()
             
+        title, content = component.get_popup_content()
         self.active_popup = BasePopupWidget(title, content, self.cfg)
-        pos = QCursor.pos()
-        self.active_popup.move(pos.x() - 100, pos.y() + 20)
-        self.active_popup.show()
+        
+        # 1. Force layout to calculate size
+        self.active_popup.adjustSize()
+        popup_w = self.active_popup.width()
+        popup_h = self.active_popup.height()
+        
+        # 2. Get Component Global Position
+        # mapToGlobal(QPoint(0,0)) gives the top-left of the component on screen
+        comp_global_pos = component.mapToGlobal(QPoint(0, 0))
+        comp_w = component.width()
+        
+        # 3. Calculate Center X
+        # Center of component - Half of popup width
+        target_x = comp_global_pos.x() + (comp_w // 2) - (popup_w // 2)
+        
+        # 4. Y Position (Immediately below the bar + margin)
+        target_y = self.cfg.bar_height + 5 
+
+        # 5. Screen Bounds Check (Right Edge)
+        if target_x + popup_w > self.screen_width - 10:
+            target_x = self.screen_width - popup_w - 10
+            
+        # 6. Screen Bounds Check (Left Edge)
+        if target_x < 10:
+            target_x = 10
+            
+        self.active_popup.move(target_x, target_y)
+        
+        # 7. Show with Animation
+        self.active_popup.show_animated()
 
     # --- AUTO HIDE LOGIC ---
     def monitor_logic(self):
         cursor = QCursor.pos()
+        
         is_hovering = self.geometry().contains(cursor)
         is_at_top_edge = cursor.y() < self.cfg.mouse_trigger_height
         is_popup_open = (self.active_popup and self.active_popup.isVisible())
         
-        user_interacting = is_hovering or is_at_top_edge or is_popup_open
+        trigger_activated = False
+        
+        if is_at_top_edge:
+            if self.is_visible:
+                trigger_activated = True
+                self.edge_dwell_start = None
+            else:
+                if self.edge_dwell_start is None:
+                    self.edge_dwell_start = time.time()
+                
+                elapsed_ms = (time.time() - self.edge_dwell_start) * 1000
+                if elapsed_ms >= self.cfg.trigger_dwell_time:
+                    trigger_activated = True
+        else:
+            self.edge_dwell_start = None
+
+        user_interacting = is_hovering or trigger_activated or is_popup_open
         
         # Check if fullscreen app is blocking
         blocked = False
@@ -137,7 +182,8 @@ class SystemStatusBar(QWidget):
         if fg and fg != int(self.winId()):
             if win32gui.GetClassName(fg) not in ["Progman", "WorkerW", "Shell_TrayWnd"]:
                 rect = win32gui.GetWindowRect(fg)
-                if win32gui.GetWindowPlacement(fg)[1] == win32con.SW_SHOWMAXIMIZED or (rect[1] < self.cfg.bar_height and rect[1] > -32000):
+                # Simple check for fullscreen height
+                if (rect[3] - rect[1]) >= self.screen.geometry().height():
                     blocked = True
         
         should_show = user_interacting or not blocked
@@ -152,6 +198,9 @@ class SystemStatusBar(QWidget):
 
     def execute_hide(self):
         self.slide_out()
+        # Close popup if bar slides out
+        if self.active_popup and self.active_popup.isVisible():
+            self.active_popup.close_animated()
 
     def slide_in(self):
         self.is_visible = True
