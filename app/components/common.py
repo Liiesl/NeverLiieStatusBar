@@ -1,8 +1,9 @@
 import qtawesome as qta
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, 
-                               QHBoxLayout, QSlider, QFrame, QToolTip, QGraphicsOpacityEffect)
+                               QHBoxLayout, QSlider, QFrame, QToolTip, QGraphicsOpacityEffect,
+                               QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QPoint, QSize
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QColor
 
 # --- SHARED COLORS ---
 ACCENT_COLOR = "#60cdff"  # Windows 11 Light Blue
@@ -12,86 +13,127 @@ TILE_HOVER = "#4e4e4e"
 TEXT_WHITE = "#ffffff"
 TEXT_SUB = "#cccccc"
 
-class ClickableLabel(QLabel):
+class ClickableLabel(QWidget):
     clicked = Signal()
 
-    def __init__(self, text, parent=None, settings=None):
-        super().__init__(text, parent)
+    def __init__(self, text="", parent=None, settings=None):
+        super().__init__(parent)
         self.settings = settings
         self.setCursor(Qt.PointingHandCursor)
-        self.setAlignment(Qt.AlignCenter)
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 0, 5, 0)
+        layout.setSpacing(5)
+
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setStyleSheet("background: transparent; border: none;")
+        self.icon_lbl.setVisible(False)
+        
+        self.text_lbl = QLabel(text)
+        self.text_lbl.setStyleSheet("background: transparent; border: none;")
+
+        layout.addWidget(self.icon_lbl)
+        layout.addWidget(self.text_lbl)
+        
+        if settings:
+            self.text_lbl.setStyleSheet(f"""
+                color: {settings.text_color};
+                font-family: '{settings.font_family}';
+                font-size: {settings.font_size};
+                background: transparent;
+            """)
+
+    def setText(self, text):
+        self.text_lbl.setText(text)
 
     def setIcon(self, icon_name, color=None):
         if not color and self.settings:
             color = self.settings.text_color
-        elif not color:
-            color = TEXT_WHITE
-            
         icon = qta.icon(icon_name, color=color)
-        self.setPixmap(icon.pixmap(QSize(20, 20)))
+        pixmap = icon.pixmap(QSize(16, 16)) 
+        self.icon_lbl.setPixmap(pixmap)
+        self.icon_lbl.setVisible(True)
 
-    def get_popup_content(self):
-        """Override this in subclasses"""
-        return "Info", QLabel("Empty")
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
 
 class BasePopupWidget(QWidget):
-    def __init__(self, title, content_widget, settings):
+    def __init__(self, title, content, settings):
         super().__init__()
-        self.settings = settings
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Popup | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
-        # Main Layout
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Start invisible for animation
+        self.setWindowOpacity(0.0)
+
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10) # Margin for shadow
+
+        # The visible container
+        self.frame = QFrame()
+        self.frame.setObjectName("PopupFrame")
         
-        # Container (for styling border/bg)
-        self.container = QFrame()
-        self.container.setStyleSheet(f"""
-            QFrame {{
-                background-color: {BG_DARK};
-                border: 1px solid {settings.border_color};
-                border-radius: {settings.border_radius}px;
+        # Windows 11 Dark Theme Style
+        self.frame.setStyleSheet(f"""
+            QFrame#PopupFrame {{
+                background-color: #242424; 
+                border: 1px solid #454545;
+                border-radius: 12px;
             }}
+            QLabel {{ color: #ffffff; border: none; font-family: 'Segoe UI'; }}
         """)
         
-        container_layout = QVBoxLayout(self.container)
-        container_layout.setContentsMargins(15, 15, 15, 15)
-        container_layout.setSpacing(10)
+        # Drop Shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        self.frame.setGraphicsEffect(shadow)
         
-        # Header
-        header_lbl = QLabel(title)
-        header_lbl.setStyleSheet(f"color: {TEXT_WHITE}; font-weight: bold; font-size: 14px; border: none;")
-        container_layout.addWidget(header_lbl)
-        
-        # Content
-        container_layout.addWidget(content_widget)
-        
-        layout.addWidget(self.container)
-        
-        # Animation Setup
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.anim.setDuration(200)
-        
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(16, 16, 16, 16)
+        frame_layout.setSpacing(12)
+
+        if title and title != "Quick Settings": 
+            title_lbl = QLabel(f"<b>{title}</b>")
+            title_lbl.setAlignment(Qt.AlignCenter)
+            frame_layout.addWidget(title_lbl)
+
+        if isinstance(content, str):
+            lbl = QLabel(content)
+            lbl.setWordWrap(True)
+            frame_layout.addWidget(lbl)
+        elif isinstance(content, QWidget):
+            frame_layout.addWidget(content)
+
+        main_layout.addWidget(self.frame)
+
+        # --- ANIMATIONS ---
+        self.anim_opacity = QPropertyAnimation(self, b"windowOpacity")
+        self.anim_opacity.setDuration(150)
+        self.anim_opacity.setEasingCurve(QEasingCurve.OutCubic)
+
     def show_animated(self):
-        self.setWindowOpacity(0)
+        """Fade in and slight slide down"""
+        # Ensure we layout first to get correct geometry for positioning
+        self.adjustSize() 
         self.show()
-        self.anim.setStartValue(0)
-        self.anim.setEndValue(1)
-        self.anim.setEasingCurve(QEasingCurve.OutCubic)
-        self.anim.start()
+        
+        self.anim_opacity.stop()
+        self.anim_opacity.setStartValue(0.0)
+        self.anim_opacity.setEndValue(1.0)
+        self.anim_opacity.start()
 
     def close_animated(self):
-        self.anim.setStartValue(1)
-        self.anim.setEndValue(0)
-        self.anim.finished.connect(self.close)
-        self.anim.start()
+        """Fade out then close"""
+        self.anim_opacity.stop()
+        self.anim_opacity.setStartValue(self.windowOpacity())
+        self.anim_opacity.setEndValue(0.0)
+        self.anim_opacity.finished.connect(self.close)
+        self.anim_opacity.start()
 
 # --- SHARED UI CONTROLS ---
 
