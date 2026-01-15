@@ -38,6 +38,7 @@ class SystemStatusBar(QWidget):
         self.screen = QApplication.primaryScreen()
         self.screen_width = self.screen.geometry().width()
 
+        # Added Tool and WindowDoesNotAcceptFocus to help with overlay behavior
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setGeometry(0, 0, self.screen_width, self.cfg.bar_height)
@@ -113,8 +114,6 @@ class SystemStatusBar(QWidget):
     def handle_popup(self, component):
         """Calculates precise position relative to component and animates."""
         if self.active_popup: 
-            # If we click the same component, close it
-            # (Requires tracking which component opened the popup, simplified here just to close)
             self.active_popup.close()
             
         title, content = component.get_popup_content()
@@ -123,35 +122,56 @@ class SystemStatusBar(QWidget):
         # 1. Force layout to calculate size
         self.active_popup.adjustSize()
         popup_w = self.active_popup.width()
-        popup_h = self.active_popup.height()
         
         # 2. Get Component Global Position
-        # mapToGlobal(QPoint(0,0)) gives the top-left of the component on screen
         comp_global_pos = component.mapToGlobal(QPoint(0, 0))
         comp_w = component.width()
         
         # 3. Calculate Center X
-        # Center of component - Half of popup width
         target_x = comp_global_pos.x() + (comp_w // 2) - (popup_w // 2)
         
-        # 4. Y Position (Immediately below the bar + margin)
+        # 4. Y Position
         target_y = self.cfg.bar_height + 5 
 
-        # 5. Screen Bounds Check (Right Edge)
+        # 5. Screen Bounds Check
         if target_x + popup_w > self.screen_width - 10:
             target_x = self.screen_width - popup_w - 10
-            
-        # 6. Screen Bounds Check (Left Edge)
         if target_x < 10:
             target_x = 10
             
         self.active_popup.move(target_x, target_y)
         
-        # 7. Show with Animation
+        # Force popup on top as well
+        self.active_popup.show()
+        # Apply the win32 Z-order fix to the popup too
+        hwnd_popup = int(self.active_popup.winId())
+        win32gui.SetWindowPos(hwnd_popup, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+        
         self.active_popup.show_animated()
+
+    def force_z_order(self):
+        """
+        Forcefully reapplies the HWND_TOPMOST flag. 
+        Windows likes to remove this flag when returning from sleep/lock.
+        """
+        try:
+            hwnd = int(self.winId())
+            win32gui.SetWindowPos(
+                hwnd, 
+                win32con.HWND_TOPMOST, 
+                0, 0, 0, 0, 
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+            )
+        except Exception:
+            pass
 
     # --- AUTO HIDE LOGIC ---
     def monitor_logic(self):
+        # 1. FIX: Enforce Always on Top if visible
+        if self.is_visible:
+            self.force_z_order()
+
         cursor = QCursor.pos()
         
         is_hovering = self.geometry().contains(cursor)
@@ -182,7 +202,6 @@ class SystemStatusBar(QWidget):
         if fg and fg != int(self.winId()):
             if win32gui.GetClassName(fg) not in ["Progman", "WorkerW", "Shell_TrayWnd"]:
                 rect = win32gui.GetWindowRect(fg)
-                # Simple check for fullscreen height
                 if (rect[3] - rect[1]) >= self.screen.geometry().height():
                     blocked = True
         
@@ -198,12 +217,12 @@ class SystemStatusBar(QWidget):
 
     def execute_hide(self):
         self.slide_out()
-        # Close popup if bar slides out
         if self.active_popup and self.active_popup.isVisible():
             self.active_popup.close_animated()
 
     def slide_in(self):
         self.is_visible = True
+        self.force_z_order() # Ensure it's on top immediately upon sliding in
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
         self.anim.setEndValue(QRect(0, 0, self.screen_width, self.cfg.bar_height))
