@@ -102,6 +102,7 @@ class AudioScanWorker(QThread):
         except: pass
 
 # --- MEDIA CONTROL WORKER (WINRT) ---
+# --- MEDIA CONTROL WORKER (WINRT) ---
 class MediaWorker(QThread):
     metadata_updated = Signal(str, str, bytes) # title, artist, thumbnail_bytes
     status_updated = Signal(bool) # is_playing
@@ -111,8 +112,11 @@ class MediaWorker(QThread):
         self.running = True
         self.manager = None
         self.current_session = None
-        self.last_title = ""
         
+        # State tracking
+        self.last_title = ""
+        self.current_thumbnail = b"" # Store the thumbnail bytes here
+
     def get_manager(self):
         if not WINRT_AVAILABLE: return None
         if self.manager is None:
@@ -152,10 +156,12 @@ class MediaWorker(QThread):
                             title = props.title if props.title else "Unknown Title"
                             artist = props.artist if props.artist else ""
                             
-                            # Only fetch thumbnail if title changed
-                            thumb_data = b""
-                            if title != self.last_title or self.last_title == "":
+                            # Check if title changed. If so, fetch NEW art.
+                            # If not, we keep self.current_thumbnail as is.
+                            if title != self.last_title:
                                 self.last_title = title
+                                self.current_thumbnail = b"" # Reset first
+                                
                                 if props.thumbnail:
                                     try:
                                         stream = props.thumbnail.open_read_async().get()
@@ -164,26 +170,25 @@ class MediaWorker(QThread):
                                             reader = DataReader(stream.get_input_stream_at(0))
                                             reader.load_async(size).get()
                                             
-                                            # FIX: Create buffer first, then read into it
                                             buffer = bytearray(size)
                                             reader.read_bytes(buffer)
-                                            thumb_data = bytes(buffer)
-                                            
+                                            self.current_thumbnail = bytes(buffer)
                                     except Exception as e:
                                         print(f"Thumbnail fetch error: {e}")
                             
-                            self.metadata_updated.emit(title, artist, thumb_data)
+                            # Emit the PERSISTED thumbnail data, not a temporary variable
+                            self.metadata_updated.emit(title, artist, self.current_thumbnail)
                         else:
                             self.metadata_updated.emit("Media Active", "Waiting for data...", b"")
                             
                     except Exception as e:
-                        print(f"Metadata fetch error: {e}")
                         # Keep session alive in UI even if props fail
                         self.metadata_updated.emit("Media Detected", "", b"")
                 else:
                     self.status_updated.emit(False)
                     self.metadata_updated.emit("No Media", "", b"")
                     self.last_title = ""
+                    self.current_thumbnail = b""
 
             except Exception as e:
                 print(f"MediaWorker Loop Error: {e}")
@@ -325,6 +330,7 @@ class MediaControlWidget(QWidget):
                 painter.end()
                 
                 self.art_lbl.setPixmap(target)
+                self.art_lbl.setText("") # <--- Ensure text is cleared
                 return
         
         # Default icon if no art
