@@ -1,9 +1,10 @@
 import qtawesome as qta
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QSlider, QFrame, QToolTip, QGraphicsOpacityEffect,
-                               QGraphicsDropShadowEffect, QComboBox, QListView, QSizePolicy)
+                               QGraphicsDropShadowEffect, QComboBox, QListView, QSizePolicy, QLineEdit)
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QPoint, QSize
 from PySide6.QtGui import QCursor, QColor
+import sys
 
 # --- SHARED COLORS ---
 ACCENT_COLOR = "#60cdff"  # Windows 11 Light Blue
@@ -134,6 +135,117 @@ class BasePopupWidget(QWidget):
         self.anim_opacity.setEndValue(0.0)
         self.anim_opacity.finished.connect(self.close)
         self.anim_opacity.start()
+
+# --- INPUT CONTROLS ---
+
+class ModernInput(QLineEdit):
+    def __init__(self, placeholder="Password", parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder)
+        self.setEchoMode(QLineEdit.Password)
+        self.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {TILE_INACTIVE};
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 6px;
+                color: {TEXT_WHITE};
+                selection-background-color: {ACCENT_COLOR};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {ACCENT_COLOR};
+                background-color: {BG_DARK};
+            }}
+        """)
+
+class WifiListItem(QWidget):
+    connect_requested = Signal(object, str) 
+    disconnect_requested = Signal(object) 
+
+    def __init__(self, ssid, signal_bars, is_secure, is_connected, network_obj, parent=None):
+        super().__init__(parent)
+        self.network_obj = network_obj
+        self.is_connected = is_connected
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        # --- HEADER (Always Visible) ---
+        self.header = QPushButton()
+        self.header.setCheckable(True)
+        self.header.setChecked(is_connected)
+        self.header.setFixedHeight(45)
+        self.header.setCursor(Qt.PointingHandCursor)
+        
+        icon_name = "mdi.wifi"
+        if signal_bars < 2: icon_name = "mdi.wifi-strength-1"
+        elif signal_bars < 4: icon_name = "mdi.wifi-strength-2"
+        
+        if is_secure:
+            icon_name += "-lock"
+            
+        icon_color = ACCENT_COLOR if is_connected else TEXT_WHITE
+        self.header.setIcon(qta.icon(icon_name, color=icon_color))
+        self.header.setText(f"  {ssid}")
+        
+        self.header.setStyleSheet(f"""
+            QPushButton {{
+                text-align: left;
+                padding-left: 10px;
+                background-color: transparent;
+                border: none;
+                color: {TEXT_WHITE};
+                font-weight: {'bold' if is_connected else 'normal'};
+            }}
+            QPushButton:hover {{ background-color: {TILE_HOVER}; }}
+            QPushButton:checked {{ background-color: {TILE_INACTIVE}; }}
+        """)
+        self.header.clicked.connect(self.toggle_expanded)
+        layout.addWidget(self.header)
+
+        # --- DETAILS ---
+        self.details = QFrame()
+        self.details.setVisible(False)
+        det_layout = QVBoxLayout(self.details)
+        det_layout.setContentsMargins(10, 0, 10, 10)
+        
+        if is_connected:
+            btn_disc = QPushButton("Disconnect")
+            btn_disc.setCursor(Qt.PointingHandCursor)
+            btn_disc.setStyleSheet(f"background-color: {TILE_INACTIVE}; color: white; border: 1px solid #555; border-radius: 4px; padding: 6px;")
+            btn_disc.clicked.connect(lambda: self.disconnect_requested.emit(self.network_obj))
+            det_layout.addWidget(btn_disc)
+        else:
+            # --- DEBUG: CHECKING WIDGET PARENTING ---
+            print(f"DEBUG: Initializing input for {ssid}")
+            
+            # THE FIX: 
+            # Original: self.txt_pass = ModernInput()
+            # New (Debug):
+            
+            # Passing 'parent=self.details' prevents it from becoming a top-level window (popup)
+            self.txt_pass = ModernInput(parent=self.details) 
+            
+            self.txt_pass.setVisible(is_secure)
+            
+            btn_conn = QPushButton("Connect")
+            btn_conn.setCursor(Qt.PointingHandCursor)
+            btn_conn.setStyleSheet(f"background-color: {ACCENT_COLOR}; color: black; border-radius: 4px; padding: 6px; font-weight: bold;")
+            btn_conn.clicked.connect(self._on_connect)
+
+            det_layout.addWidget(self.txt_pass)
+            det_layout.addWidget(btn_conn)
+
+        layout.addWidget(self.details)
+
+    def toggle_expanded(self):
+        self.details.setVisible(not self.details.isVisible())
+        self.header.setChecked(self.details.isVisible() or self.is_connected)
+
+    def _on_connect(self):
+        pwd = self.txt_pass.text()
+        self.connect_requested.emit(self.network_obj, pwd)
 
 # --- SHARED UI CONTROLS ---
 
