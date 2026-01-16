@@ -8,7 +8,7 @@ class Settings:
         self.anim_duration = 250
         self.monitor_interval = 200
         self.auto_hide_delay = 600
-        self.trigger_dwell_time = 250  # NEW: Time (ms) mouse must sit at top to trigger bar
+        self.trigger_dwell_time = 400  # NEW: Time (ms) mouse must sit at top to trigger bar
         
         # --- UPDATE INTERVALS ---
         self.audio_poll_rate = 500
