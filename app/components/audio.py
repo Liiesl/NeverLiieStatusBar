@@ -10,9 +10,24 @@ except ImportError:
         eCommunications = 2
 
 import time
-from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from .common import ClickableLabel, ModernSlider, DeviceListItem
+import io
+from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QSize, QByteArray, QBuffer, QIODevice
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                               QPushButton, QFrame, QSizePolicy)
+from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPainterPath
+
+# --- WinRT Imports for Media Control ---
+try:
+    # pip install winrt-Windows.Media.Control winrt-Windows.Storage.Streams winrt-Windows.Foundation
+    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager, GlobalSystemMediaTransportControlsSessionPlaybackStatus
+    from winrt.windows.storage.streams import DataReader, InputStreamOptions
+    WINRT_AVAILABLE = True
+except ImportError as e:
+    WINRT_AVAILABLE = False
+    print(f"WinRT libraries not found: {e}. Media controls will be disabled.")
+
+import qtawesome as qta
+from .common import ClickableLabel, ModernSlider, DeviceListItem, ACCENT_COLOR, TILE_INACTIVE, TILE_HOVER
 
 # --- HELPER FUNCTION FOR DEVICE NAMES ---
 def get_device_name(dev):
@@ -45,7 +60,7 @@ def get_icon_for_dev(name, is_input):
         return "mdi.monitor"
     return "mdi.speaker"
 
-# --- BACKGROUND WORKER ---
+# --- AUDIO SCAN WORKER ---
 class AudioScanWorker(QThread):
     scan_finished = Signal(list, list) 
 
@@ -86,6 +101,240 @@ class AudioScanWorker(QThread):
             comtypes.CoUninitialize()
         except: pass
 
+# --- MEDIA CONTROL WORKER (WINRT) ---
+class MediaWorker(QThread):
+    metadata_updated = Signal(str, str, bytes) # title, artist, thumbnail_bytes
+    status_updated = Signal(bool) # is_playing
+
+    def __init__(self):
+        super().__init__()
+        self.running = True
+        self.manager = None
+        self.current_session = None
+        self.last_title = ""
+        
+    def get_manager(self):
+        if not WINRT_AVAILABLE: return None
+        if self.manager is None:
+            try:
+                # Synchronously wait for manager
+                self.manager = GlobalSystemMediaTransportControlsSessionManager.request_async().get()
+            except Exception as e:
+                print(f"WinRT Manager Request Failed: {e}")
+                self.manager = None
+        return self.manager
+
+    def run(self):
+        while self.running and WINRT_AVAILABLE:
+            try:
+                mgr = self.get_manager()
+                if not mgr:
+                    time.sleep(2)
+                    continue
+
+                session = mgr.get_current_session()
+                self.current_session = session 
+
+                if session:
+                    # 1. Status
+                    try:
+                        info = session.get_playback_info()
+                        is_playing = (info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING)
+                        self.status_updated.emit(is_playing)
+                    except:
+                        self.status_updated.emit(False)
+
+                    # 2. Metadata
+                    try:
+                        props = session.try_get_media_properties_async().get()
+                        
+                        if props:
+                            title = props.title if props.title else "Unknown Title"
+                            artist = props.artist if props.artist else ""
+                            
+                            # Only fetch thumbnail if title changed
+                            thumb_data = b""
+                            if title != self.last_title or self.last_title == "":
+                                self.last_title = title
+                                if props.thumbnail:
+                                    try:
+                                        stream = props.thumbnail.open_read_async().get()
+                                        size = stream.size
+                                        if size > 0:
+                                            reader = DataReader(stream.get_input_stream_at(0))
+                                            reader.load_async(size).get()
+                                            
+                                            # FIX: Create buffer first, then read into it
+                                            buffer = bytearray(size)
+                                            reader.read_bytes(buffer)
+                                            thumb_data = bytes(buffer)
+                                            
+                                    except Exception as e:
+                                        print(f"Thumbnail fetch error: {e}")
+                            
+                            self.metadata_updated.emit(title, artist, thumb_data)
+                        else:
+                            self.metadata_updated.emit("Media Active", "Waiting for data...", b"")
+                            
+                    except Exception as e:
+                        print(f"Metadata fetch error: {e}")
+                        # Keep session alive in UI even if props fail
+                        self.metadata_updated.emit("Media Detected", "", b"")
+                else:
+                    self.status_updated.emit(False)
+                    self.metadata_updated.emit("No Media", "", b"")
+                    self.last_title = ""
+
+            except Exception as e:
+                print(f"MediaWorker Loop Error: {e}")
+            
+            time.sleep(1)
+
+    def stop(self):
+        self.running = False
+        self.wait()
+
+    # Public control methods
+    def toggle_play(self):
+        if self.current_session:
+            try: self.current_session.try_toggle_play_pause_async()
+            except: pass
+
+    def next_track(self):
+        if self.current_session:
+            try: self.current_session.try_skip_next_async()
+            except: pass
+
+    def prev_track(self):
+        if self.current_session:
+            try: self.current_session.try_skip_previous_async()
+            except: pass
+
+# --- MEDIA CONTROL WIDGET ---
+class MediaControlWidget(QWidget):
+    def __init__(self, worker):
+        super().__init__()
+        self.worker = worker
+        self.setup_ui()
+        
+        # Connect worker signals
+        self.worker.metadata_updated.connect(self.update_metadata)
+        self.worker.status_updated.connect(self.update_status)
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # Background style
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {TILE_INACTIVE};
+                border-radius: 8px;
+            }}
+        """)
+
+        # 1. Info Row (Art + Text)
+        info_layout = QHBoxLayout()
+        
+        # Album Art
+        self.art_lbl = QLabel()
+        self.art_lbl.setFixedSize(48, 48)
+        self.art_lbl.setStyleSheet("background-color: #333; border-radius: 4px; border: 1px solid #555;")
+        self.art_lbl.setAlignment(Qt.AlignCenter)
+        
+        # Text Info
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        text_layout.setContentsMargins(0, 4, 0, 4)
+        
+        self.title_lbl = QLabel("No Media")
+        self.title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: white; background: transparent;")
+        
+        self.artist_lbl = QLabel("")
+        self.artist_lbl.setStyleSheet("font-size: 11px; color: #aaaaaa; background: transparent;")
+        
+        text_layout.addWidget(self.title_lbl)
+        text_layout.addWidget(self.artist_lbl)
+        text_layout.addStretch()
+
+        info_layout.addWidget(self.art_lbl)
+        info_layout.addLayout(text_layout)
+        info_layout.addStretch()
+
+        layout.addLayout(info_layout)
+
+        # 2. Controls Row
+        ctrl_layout = QHBoxLayout()
+        ctrl_layout.setContentsMargins(0, 0, 0, 0)
+        ctrl_layout.setSpacing(15)
+        ctrl_layout.setAlignment(Qt.AlignCenter)
+
+        self.btn_prev = self._make_btn("mdi.skip-previous", self.worker.prev_track)
+        self.btn_play = self._make_btn("mdi.play", self.worker.toggle_play, size=32)
+        self.btn_next = self._make_btn("mdi.skip-next", self.worker.next_track)
+
+        ctrl_layout.addWidget(self.btn_prev)
+        ctrl_layout.addWidget(self.btn_play)
+        ctrl_layout.addWidget(self.btn_next)
+
+        layout.addLayout(ctrl_layout)
+
+    def _make_btn(self, icon, func, size=28):
+        btn = QPushButton()
+        btn.setFixedSize(size, size)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(func)
+        btn.setIcon(qta.icon(icon, color="white"))
+        btn.setIconSize(QSize(size-10, size-10))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border-radius: {size//2}px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 0.1);
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(255, 255, 255, 0.2);
+            }}
+        """)
+        return btn
+
+    def update_metadata(self, title, artist, thumb_bytes):
+        self.title_lbl.setText(title[:30] + "..." if len(title) > 30 else title)
+        self.artist_lbl.setText(artist[:30] + "..." if len(artist) > 30 else artist)
+        
+        if thumb_bytes:
+            pixmap = QPixmap()
+            pixmap.loadFromData(thumb_bytes)
+            if not pixmap.isNull():
+                # Scale and round corners
+                scaled = pixmap.scaled(48, 48, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                
+                # Apply rounded clipping
+                target = QPixmap(48, 48)
+                target.fill(Qt.transparent)
+                painter = QPainter(target)
+                painter.setRenderHint(QPainter.Antialiasing)
+                path = QPainterPath()
+                path.addRoundedRect(0, 0, 48, 48, 4, 4)
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, scaled)
+                painter.end()
+                
+                self.art_lbl.setPixmap(target)
+                return
+        
+        # Default icon if no art
+        self.art_lbl.setPixmap(QPixmap())
+        self.art_lbl.setText("🎵")
+
+    def update_status(self, is_playing):
+        icon = "mdi.pause" if is_playing else "mdi.play"
+        self.btn_play.setIcon(qta.icon(icon, color="white"))
+
 # --- MAIN COMPONENT ---
 class AudioComponent(ClickableLabel):
     def __init__(self, settings, parent=None):
@@ -111,6 +360,9 @@ class AudioComponent(ClickableLabel):
 
         self.scanner = AudioScanWorker()
         self.scanner.scan_finished.connect(self.on_scan_finished)
+        
+        # Media Worker (WinRT)
+        self.media_worker = MediaWorker()
         
         self.refresh_interfaces()
         self.scanner.start()
@@ -168,7 +420,6 @@ class AudioComponent(ClickableLabel):
             btn = DeviceListItem(name, dev_id, is_active, icon_name=icon)
             
             # Use closure to capture device ID
-            # When clicked, update default device
             btn.clicked.connect(lambda checked=False, d_id=dev_id, inp=is_input: self._on_device_selected(d_id, inp))
             
             layout.addWidget(btn)
@@ -188,7 +439,7 @@ class AudioComponent(ClickableLabel):
         
         self.refresh_interfaces()
         
-        # 3. Visually update the list (make the clicked one active, others inactive)
+        # 3. Visually update the list
         layout = self.in_list_layout if is_input else self.out_list_layout
         if layout:
             for i in range(layout.count()):
@@ -277,6 +528,10 @@ class AudioComponent(ClickableLabel):
             self.scanner.start()
         self.refresh_interfaces()
 
+        # Start Media Worker if not running
+        if not self.media_worker.isRunning():
+            self.media_worker.start()
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -314,7 +569,7 @@ class AudioComponent(ClickableLabel):
         self.slider_out_ref.icon_clicked.connect(lambda: self.toggle_mute(self.slider_out_ref, is_input=False))
         layout.addWidget(self.slider_out_ref)
 
-        layout.addSpacing(15)
+        layout.addSpacing(10)
 
         # --- INPUT ---
         lbl_in = QLabel("Input Device")
@@ -342,4 +597,15 @@ class AudioComponent(ClickableLabel):
         self.slider_in_ref.icon_clicked.connect(lambda: self.toggle_mute(self.slider_in_ref, is_input=True))
         layout.addWidget(self.slider_in_ref)
 
+        layout.addSpacing(15)
+
+        # --- MEDIA CONTROL WIDGET ---
+        if WINRT_AVAILABLE:
+            lbl_media = QLabel("Media Control")
+            lbl_media.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 4px;")
+            layout.addWidget(lbl_media)
+
+            media_widget = MediaControlWidget(self.media_worker)
+            layout.addWidget(media_widget)
+        
         return "Audio Mixer", container
