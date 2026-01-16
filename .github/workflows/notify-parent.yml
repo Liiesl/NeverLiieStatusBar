@@ -11,8 +11,7 @@ jobs:
     steps:
       - name: Trigger Parent Update
         run: |
-          # CHANGE "terminal" BELOW TO "launcher" OR "statusbar" FOR THE OTHER REPOS
-          curl -X POST https://api.github.com/repos/YOUR_USERNAME/NeverLiie/dispatches \
+          curl -X POST https://api.github.com/repos/Liiesl/NeverLiie/dispatches \
           -H 'Accept: application/vnd.github.everest-preview+json' \
           -H 'Authorization: token ${{ secrets.PAT_TOKEN }}' \
           --data '{"event_type": "update-submodules", "client_payload": { "module_name": "statusbar" }}'
