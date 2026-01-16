@@ -15,27 +15,16 @@ from PySide6.QtCore import Qt, Signal, QObject, QTimer, QThread
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, 
                                QScrollArea)
 
-# --- CONFIG ---
-ENABLE_DEBUG = True
-
-def dprint(msg):
-    if ENABLE_DEBUG:
-        ts = time.strftime("%H:%M:%S")
-        print(f"[{ts}] [NETWORK] {msg}")
-        sys.stdout.flush()
-
 # --- MODERN WINRT IMPORTS ---
 WINRT_AVAILABLE = False
 try:
-    dprint("Importing WinRT...")
     from winrt.windows.devices.wifi import WiFiAdapter, WiFiReconnectionKind
     from winrt.windows.security.credentials import PasswordCredential
     import winrt.windows.foundation
     import winrt.windows.foundation.collections # type: ignore
     WINRT_AVAILABLE = True
-    dprint("WinRT Import Successful.")
 except ImportError as e:
-    dprint(f"CRITICAL: WinRT Import Failed: {e}")
+    print(f"CRITICAL: WinRT Import Failed: {e}")
 
 from .common import ClickableLabel, WifiListItem
 
@@ -44,7 +33,6 @@ class ConnectivityWorker(QThread):
     status_changed = Signal(bool) 
 
     def run(self):
-        dprint("Connectivity Checker started.")
         while True:
             is_online = self.check_internet()
             self.status_changed.emit(is_online)
@@ -78,32 +66,26 @@ class WinRTWorker(QObject):
             # Don't re-init if already done
             if self.adapter: 
                 return
-            dprint("Initializing Adapter sequence...")
             asyncio.run_coroutine_threadsafe(self._init_adapter(), self.loop)
         else:
             self.status_msg.emit("WinRT Missing")
 
     async def _init_adapter(self):
         try:
-            dprint("Requesting Access Async...")
             await WiFiAdapter.request_access_async()
             
-            dprint("Finding Adapters...")
             devs = await WiFiAdapter.find_all_adapters_async()
             
             if devs:
                 self.adapter = devs[0]
-                dprint(f"Adapter Found: {self.adapter}")
                 await self._scan()
             else:
-                dprint("No WiFi Adapter found.")
                 self.status_msg.emit("No Adapter")
         except Exception as e:
-            dprint(f"INIT ERROR: {traceback.format_exc()}")
+            print(f"INIT ERROR: {traceback.format_exc()}")
             self.status_msg.emit("Init Error")
 
     def request_scan(self):
-        dprint("Scan requested by UI.")
         if self.adapter:
             asyncio.run_coroutine_threadsafe(self._scan(), self.loop)
         else:
@@ -112,14 +94,10 @@ class WinRTWorker(QObject):
 
     async def _scan(self):
         self.status_msg.emit("Scanning...")
-        dprint("Starting Scan...")
         try:
-            dprint("--- CALLING ADAPTER.SCAN_ASYNC() ---")
             await self.adapter.scan_async()
-            dprint("--- SCAN_ASYNC RETURNED ---")
             
             report = self.adapter.network_report 
-            dprint(f"Report received. Found {report.available_networks.size} networks.")
             
             results = []
             seen_ssids = set()
@@ -146,16 +124,14 @@ class WinRTWorker(QObject):
             
             results.sort(key=lambda x: (not x[3], -x[1]))
             
-            dprint(f"Emitting {len(results)} results.")
             self.scan_finished.emit(results)
             self.status_msg.emit("Ready")
             
         except Exception as e:
-            dprint(f"SCAN ERROR: {traceback.format_exc()}")
+            print(f"SCAN ERROR: {traceback.format_exc()}")
             self.status_msg.emit("Scan Failed")
 
     def request_connect(self, network_obj, password):
-        dprint(f"Connection request for {network_obj.ssid}")
         asyncio.run_coroutine_threadsafe(self._connect(network_obj, password), self.loop)
 
     async def _connect(self, net, password):
@@ -169,13 +145,10 @@ class WinRTWorker(QObject):
         recon = WiFiReconnectionKind.AUTOMATIC
         
         try:
-            dprint("Calling connect_async...")
             if cred:
                 result = await self.adapter.connect_async(net, recon, cred)
             else:
                 result = await self.adapter.connect_async(net, recon)
-
-            dprint(f"Connect result code: {result.connection_status}")
 
             if result.connection_status == 0: 
                 self.status_msg.emit("Connected")
@@ -184,7 +157,7 @@ class WinRTWorker(QObject):
             else:
                 self.status_msg.emit(f"Failed: {result.connection_status}")
         except Exception as e:
-            dprint(f"CONNECT ERROR: {e}")
+            print(f"CONNECT ERROR: {e}")
             self.status_msg.emit("Conn Error")
 
     def request_disconnect(self, network_obj):
@@ -193,13 +166,12 @@ class WinRTWorker(QObject):
     async def _disconnect(self):
         if self.adapter:
             try:
-                dprint("Disconnecting...")
                 self.adapter.disconnect()
                 self.status_msg.emit("Disconnected")
                 await asyncio.sleep(1)
                 await self._scan()
             except Exception as e:
-                dprint(f"DISCONNECT ERROR: {e}")
+                print(f"DISCONNECT ERROR: {e}")
                 self.status_msg.emit("Disc Error")
 
 # --- UI COMPONENTS ---
@@ -251,7 +223,6 @@ class WifiPopupWidget(QWidget):
         
         # 1. Load Cache Immediately (Instant UI)
         if cached_data:
-            dprint("Loading cached networks...")
             self.lbl_status.setText("Cached Data")
             self.update_list(cached_data)
         
@@ -264,44 +235,32 @@ class WifiPopupWidget(QWidget):
              QTimer.singleShot(500, self.worker.request_scan)
 
     def update_list(self, networks):
-        dprint("Updating UI list... (Start)")
         try:
-            dprint(f"Clearing {self.vbox_networks.count()} existing items...")
             while self.vbox_networks.count() > 1:
                 child = self.vbox_networks.takeAt(0)
                 if child.widget():
                     child.widget().deleteLater()
             
-            dprint("Existing items cleared.")
-
             if not networks:
-                dprint("No networks to add.")
                 lbl = QLabel("No networks found")
                 lbl.setAlignment(Qt.AlignCenter)
                 lbl.setStyleSheet("color: #666; padding: 20px;")
                 self.vbox_networks.insertWidget(0, lbl)
                 return
-
-            dprint(f"Looping through {len(networks)} networks to create widgets...")
             
             for i, (ssid, signal, secure, connected, net_obj) in enumerate(networks):
                 # Check start time of creation for debug
-                t_start = time.perf_counter()
                 
                 # Passing parent=self.scroll_content helps ensure ownership
                 item = WifiListItem(ssid, signal, secure, connected, net_obj)
                 
-                t_end = time.perf_counter()
-                if i < 5: dprint(f"[{i}] Item created in {(t_end - t_start):.4f}s")
-
                 item.connect_requested.connect(self.worker.request_connect)
                 item.disconnect_requested.connect(self.worker.request_disconnect)
                 self.vbox_networks.insertWidget(self.vbox_networks.count()-1, item)
             
-            dprint("All network items added.")
         
         except Exception as e:
-            dprint(f"ERROR in update_list: {e}")
+            print(f"ERROR in update_list: {e}")
             traceback.print_exc()
 
 class NetworkComponent(ClickableLabel):
@@ -323,7 +282,6 @@ class NetworkComponent(ClickableLabel):
         QTimer.singleShot(2000, self.worker.start_init)
 
     def _on_background_scan_finished(self, networks):
-        dprint(f"Network Component received {len(networks)} networks (Background Update)")
         self.cached_networks = networks
 
     def update_icon_status(self, is_online):

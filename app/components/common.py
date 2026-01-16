@@ -216,10 +216,7 @@ class WifiListItem(QWidget):
             btn_disc.setStyleSheet(f"background-color: {TILE_INACTIVE}; color: white; border: 1px solid #555; border-radius: 4px; padding: 6px;")
             btn_disc.clicked.connect(lambda: self.disconnect_requested.emit(self.network_obj))
             det_layout.addWidget(btn_disc)
-        else:
-            # --- DEBUG: CHECKING WIDGET PARENTING ---
-            print(f"DEBUG: Initializing input for {ssid}")
-            
+        else:            
             # THE FIX: 
             # Original: self.txt_pass = ModernInput()
             # New (Debug):
