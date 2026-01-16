@@ -102,7 +102,6 @@ class AudioScanWorker(QThread):
         except: pass
 
 # --- MEDIA CONTROL WORKER (WINRT) ---
-# --- MEDIA CONTROL WORKER (WINRT) ---
 class MediaWorker(QThread):
     metadata_updated = Signal(str, str, bytes) # title, artist, thumbnail_bytes
     status_updated = Signal(bool) # is_playing
@@ -543,20 +542,20 @@ class AudioComponent(ClickableLabel):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(10)
 
-        # --- OUTPUT ---
-        lbl_out = QLabel("Output Device")
-        lbl_out.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 4px;")
-        layout.addWidget(lbl_out)
+        # Helper to add section dividers
+        def add_divider():
+            line = QFrame()
+            line.setFrameShape(QFrame.HLine)
+            line.setFrameShadow(QFrame.Sunken)
+            line.setStyleSheet(f"background-color: #3e3e3e; max-height: 1px; margin-top: 5px; margin-bottom: 5px;")
+            layout.addWidget(line)
 
-        # Output List Layout
-        self.out_list_layout = QVBoxLayout()
-        self.out_list_layout.setSpacing(2)
-        layout.addLayout(self.out_list_layout)
+        # --- SECTION 1: MASTER VOLUME (Both Sliders) ---
+        lbl_vol = QLabel("Master Volume")
+        lbl_vol.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 2px;")
+        layout.addWidget(lbl_vol)
 
-        # Initial Populate
-        self._repopulate_list(self.out_list_layout, self.output_devices_list, self.current_output_id, is_input=False)
-
-        # Output Slider
+        # 1A. Speaker Logic & Slider
         spk_vol = 0
         spk_muted = False
         if self.spk_interface:
@@ -573,22 +572,10 @@ class AudioComponent(ClickableLabel):
         self.slider_out_ref = ModernSlider(out_icon, spk_vol, clickable_icon=True)
         self.slider_out_ref.slider.valueChanged.connect(self.set_speaker_volume)
         self.slider_out_ref.icon_clicked.connect(lambda: self.toggle_mute(self.slider_out_ref, is_input=False))
+        self.slider_out_ref.setToolTip("Speaker Volume")
         layout.addWidget(self.slider_out_ref)
 
-        layout.addSpacing(10)
-
-        # --- INPUT ---
-        lbl_in = QLabel("Input Device")
-        lbl_in.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 4px;")
-        layout.addWidget(lbl_in)
-
-        self.in_list_layout = QVBoxLayout()
-        self.in_list_layout.setSpacing(2)
-        layout.addLayout(self.in_list_layout)
-        
-        # Initial Populate
-        self._repopulate_list(self.in_list_layout, self.input_devices_list, self.current_input_id, is_input=True)
-
+        # 1B. Microphone Logic & Slider
         mic_vol = 0
         mic_muted = False
         if self.mic_interface:
@@ -601,14 +588,43 @@ class AudioComponent(ClickableLabel):
         self.slider_in_ref = ModernSlider(in_icon, mic_vol, clickable_icon=True)
         self.slider_in_ref.slider.valueChanged.connect(self.set_mic_volume)
         self.slider_in_ref.icon_clicked.connect(lambda: self.toggle_mute(self.slider_in_ref, is_input=True))
+        self.slider_in_ref.setToolTip("Microphone Volume")
         layout.addWidget(self.slider_in_ref)
 
-        layout.addSpacing(15)
+        add_divider()
 
-        # --- MEDIA CONTROL WIDGET ---
+        # --- SECTION 2: OUTPUT DEVICE ---
+        lbl_out = QLabel("Output Device")
+        lbl_out.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 2px;")
+        layout.addWidget(lbl_out)
+
+        self.out_list_layout = QVBoxLayout()
+        self.out_list_layout.setSpacing(2)
+        layout.addLayout(self.out_list_layout)
+
+        # Initial Populate Output
+        self._repopulate_list(self.out_list_layout, self.output_devices_list, self.current_output_id, is_input=False)
+
+        add_divider()
+
+        # --- SECTION 3: INPUT DEVICE ---
+        lbl_in = QLabel("Input Device")
+        lbl_in.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 2px;")
+        layout.addWidget(lbl_in)
+
+        self.in_list_layout = QVBoxLayout()
+        self.in_list_layout.setSpacing(2)
+        layout.addLayout(self.in_list_layout)
+        
+        # Initial Populate Input
+        self._repopulate_list(self.in_list_layout, self.input_devices_list, self.current_input_id, is_input=True)
+
+        # --- SECTION 4: MEDIA CONTROL (IF AVAILABLE) ---
         if WINRT_AVAILABLE:
-            lbl_media = QLabel("Media Control")
-            lbl_media.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 4px;")
+            add_divider()
+
+            lbl_media = QLabel("Media Player")
+            lbl_media.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 2px;")
             layout.addWidget(lbl_media)
 
             media_widget = MediaControlWidget(self.media_worker)
