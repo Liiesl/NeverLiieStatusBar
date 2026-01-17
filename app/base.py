@@ -2,8 +2,7 @@
 import win32gui
 import win32con
 import time
-from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QHBoxLayout, 
-                               QSpacerItem, QSizePolicy)
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout)
 from PySide6.QtCore import Qt, QTimer, QRect, QEasingCurve, QPropertyAnimation, QPoint
 from PySide6.QtGui import QCursor
 
@@ -32,7 +31,7 @@ class SystemStatusBar(QWidget):
 
         self.setup_ui()
         
-        # Logic Monitor (Mouse/Focus)
+        # Logic Monitor (Mouse/Focus) - Always runs to detect edge triggers
         self.monitor_timer = QTimer(self)
         self.monitor_timer.timeout.connect(self.monitor_logic)
         self.monitor_timer.start(self.cfg.monitor_interval)
@@ -51,11 +50,10 @@ class SystemStatusBar(QWidget):
         # Set geometry to cover width, but height includes the top margin gap
         self.setGeometry(0, 0, self.screen_width, self.total_window_height)
 
-        # Layout Container (The Window holds the layout, the layout holds the visual container)
+        # Layout Container
         layout = QHBoxLayout(self)
         
-        # --- KEY CHANGE: Add Margins to the Main Layout ---
-        # This squeezes the container away from edges
+        # Margins
         layout.setContentsMargins(
             self.cfg.floating_margin_x, # Left
             self.cfg.floating_margin_y, # Top
@@ -104,10 +102,7 @@ class SystemStatusBar(QWidget):
         clock_width = 300 
         self.comp_clock.setFixedSize(clock_width, self.cfg.bar_height)
         
-        # Calculate visual container width based on margins
         container_width = self.screen_width - (2 * self.cfg.floating_margin_x)
-        
-        # Center clock relative to the CONTAINER, not screen
         clock_x = (container_width - clock_width) // 2
         self.comp_clock.move(clock_x, 0)
         
@@ -120,10 +115,12 @@ class SystemStatusBar(QWidget):
         self.anim = QPropertyAnimation(self, b"geometry")
         self.anim.setDuration(self.cfg.anim_duration)
         self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        
+        # Initial State: Visible, so wake up components
         self.show()
+        self.notify_visibility(visible=True)
 
     def apply_style(self):
-        # Updated CSS for rounded corners on ALL sides
         self.container.setStyleSheet(f"""
             QWidget#MainContainer {{
                 background-color: {self.cfg.bg_color};
@@ -144,6 +141,21 @@ class SystemStatusBar(QWidget):
             }}
         """)
 
+    def notify_visibility(self, visible):
+        """
+        Lifecycle manager: Tells components to sleep (cache state) or wake up (poll).
+        This reduces CPU/RAM usage when the bar is hidden.
+        """
+        # Audio Component Optimization
+        if hasattr(self.comp_audio, 'wake_up') and hasattr(self.comp_audio, 'sleep'):
+            if visible:
+                self.comp_audio.wake_up()
+            else:
+                self.comp_audio.sleep()
+
+        # TODO: Add other components here as we optimize them
+        # if visible: self.comp_bat.wake_up() else: self.comp_bat.sleep()
+
     def handle_popup(self, component):
         if self.active_popup: 
             self.active_popup.close()
@@ -159,14 +171,7 @@ class SystemStatusBar(QWidget):
         
         target_x = comp_global_pos.x() + (comp_w // 2) - (popup_w // 2)
         
-        # --- FIX: Remove gap between bar and popup ---
-        # The BasePopupWidget has a 10px transparent margin (setContentsMargins)
-        # to hold the drop shadow. We subtract that margin so the visual frames touch.
-        # We assume common.py uses setContentsMargins(10, 10, 10, 10).
         popup_shadow_margin = 10 
-        
-        # Visual Bottom of Bar = self.total_window_height
-        # Visual Top of Popup = target_y + popup_shadow_margin
         target_y = self.total_window_height - popup_shadow_margin 
 
         if target_x + popup_w > self.screen_width - 10:
@@ -201,7 +206,6 @@ class SystemStatusBar(QWidget):
 
         cursor = QCursor.pos()
         
-        # Check if hovering over window (includes the margin gap, which makes interaction easier)
         is_hovering = self.geometry().contains(cursor)
         is_at_top_edge = cursor.y() < self.cfg.mouse_trigger_height
         is_popup_open = (self.active_popup and self.active_popup.isVisible())
@@ -249,17 +253,23 @@ class SystemStatusBar(QWidget):
 
     def slide_in(self):
         self.is_visible = True
+        
+        # Wake up components so they update data before user fully sees them
+        self.notify_visibility(True)
+        
         self.force_z_order()
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
-        # Slide down to 0 (top of screen)
         self.anim.setEndValue(QRect(0, 0, self.screen_width, self.total_window_height))
         self.anim.start()
 
     def slide_out(self):
         self.is_visible = False
+        
+        # Tell components to stop polling
+        self.notify_visibility(False)
+        
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
-        # Slide up completely off screen (Height of bar + Height of margin)
         self.anim.setEndValue(QRect(0, -self.total_window_height, self.screen_width, self.total_window_height))
         self.anim.start()

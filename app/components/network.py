@@ -1,3 +1,5 @@
+# app/components/network.py
+
 import asyncio
 import threading
 import traceback
@@ -17,15 +19,28 @@ from .common import ClickableLabel, WifiListItem
 # --- SILENT CONNECTIVITY CHECKER ---
 class ConnectivityWorker(QThread):
     status_changed = Signal(bool) 
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.running = True
+        self.paused = False
 
     def run(self):
-        while True:
-            is_online = self.check_internet()
-            self.status_changed.emit(is_online)
-            self.sleep(5)
+        while self.running:
+            if not self.paused:
+                is_online = self.check_internet()
+                self.status_changed.emit(is_online)
+                self.sleep(5)
+            else:
+                # If paused (bar hidden), sleep check to save resources
+                self.sleep(1)
+
+    def set_paused(self, is_paused):
+        self.paused = is_paused
 
     def check_internet(self):
         try:
+            # Pinging Cloudflare DNS port 53 (very low overhead)
             socket.create_connection(("1.1.1.1", 53), timeout=3)
             return True
         except OSError:
@@ -235,16 +250,11 @@ class WifiPopupWidget(QWidget):
                 return
             
             for i, (ssid, signal, secure, connected, net_obj) in enumerate(networks):
-                # Check start time of creation for debug
-                
-                # Passing parent=self.scroll_content helps ensure ownership
                 item = WifiListItem(ssid, signal, secure, connected, net_obj)
-                
                 item.connect_requested.connect(self.worker.request_connect)
                 item.disconnect_requested.connect(self.worker.request_disconnect)
                 self.vbox_networks.insertWidget(self.vbox_networks.count()-1, item)
             
-        
         except Exception as e:
             print(f"ERROR in update_list: {e}")
             traceback.print_exc()
@@ -256,16 +266,25 @@ class NetworkComponent(ClickableLabel):
         self.cached_networks = [] # Cache storage
         
         self.worker = WinRTWorker()
-        # Ensure component always listens to worker to update cache,
-        # even if popup isn't open
+        # Ensure component always listens to worker to update cache
         self.worker.scan_finished.connect(self._on_background_scan_finished)
         
-        self.conn_checker = ConnectivityWorker()
+        self.conn_checker = ConnectivityWorker(self)
         self.conn_checker.status_changed.connect(self.update_icon_status)
         self.conn_checker.start()
         
         # Trigger an initial scan shortly after startup so cache is ready
         QTimer.singleShot(2000, self.worker.start_init)
+
+    # --- OPTIMIZATION HOOKS ---
+    def wake_up(self):
+        """Called by base.py when bar is visible."""
+        self.conn_checker.set_paused(False)
+
+    def sleep(self):
+        """Called by base.py when bar hides."""
+        self.conn_checker.set_paused(True)
+    # --------------------------
 
     def _on_background_scan_finished(self, networks):
         self.cached_networks = networks
@@ -282,6 +301,9 @@ class NetworkComponent(ClickableLabel):
         if not wa.WINRT_AVAILABLE:
             return "Error", "WinRT modules missing.\nSee console logs."
         
+        # Ensure checker is running if popup is open
+        self.wake_up()
+
         # Pass the cache to the widget so it opens instantly
         widget = WifiPopupWidget(self.worker, self.cached_networks)
         return "Wi-Fi", widget

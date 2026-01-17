@@ -1,6 +1,8 @@
+# app/components/audio.py
+
 import time
 import io
-from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QSize, QByteArray, QBuffer, QIODevice
+from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QSize, QByteArray, QBuffer, QIODevice, QWaitCondition, QMutex
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QFrame, QSizePolicy)
 from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPainterPath
@@ -99,7 +101,10 @@ class MediaWorker(QThread):
         
         # State tracking
         self.last_title = ""
-        self.current_thumbnail = b"" # Store the thumbnail bytes here
+        self.current_thumbnail = b"" 
+        
+        # Optimization: Pause flag
+        self.paused = False
 
     def get_manager(self):
         if not wa.WINRT_AVAILABLE: return None
@@ -112,8 +117,16 @@ class MediaWorker(QThread):
                 self.manager = None
         return self.manager
 
+    def set_paused(self, paused):
+        self.paused = paused
+
     def run(self):
         while self.running and wa.WINRT_AVAILABLE:
+            # Optimization: If bar is hidden, don't query WinRT
+            if self.paused:
+                time.sleep(1.0)
+                continue
+
             try:
                 mgr = self.get_manager()
                 if not mgr:
@@ -352,6 +365,7 @@ class AudioComponent(ClickableLabel):
         
         # Media Worker (WinRT)
         self.media_worker = MediaWorker()
+        self.media_worker.start() # Start thread, but it might be paused via base logic
         
         self.refresh_interfaces()
         self.scanner.start()
@@ -360,6 +374,25 @@ class AudioComponent(ClickableLabel):
         self.timer.timeout.connect(self.update_status)
         self.timer.start(settings.audio_poll_rate)
         self.update_status()
+
+    # --- OPTIMIZATION METHODS ---
+    def wake_up(self):
+        """Called when bar slides in. Resume polling."""
+        # Update immediately once so the user sees fresh data during animation
+        self.refresh_interfaces()
+        self.update_status()
+        
+        # Resume timers/workers
+        if not self.timer.isActive():
+            self.timer.start(self.settings.audio_poll_rate)
+        
+        self.media_worker.set_paused(False)
+
+    def sleep(self):
+        """Called when bar slides out. Stop polling to save CPU/RAM."""
+        self.timer.stop()
+        self.media_worker.set_paused(True)
+    # ----------------------------
 
     def refresh_interfaces(self):
         if not wa.COM_AVAILABLE: return
@@ -518,11 +551,9 @@ class AudioComponent(ClickableLabel):
     def get_popup_content(self):
         if not self.scanner.isRunning():
             self.scanner.start()
-        self.refresh_interfaces()
-
-        # Start Media Worker if not running
-        if not self.media_worker.isRunning():
-            self.media_worker.start()
+        
+        # Ensure polling is active if popup is opened (edge case where bar is somehow hidden but popup exists)
+        self.wake_up()
 
         container = QWidget()
         layout = QVBoxLayout(container)

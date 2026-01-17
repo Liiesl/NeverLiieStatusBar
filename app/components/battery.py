@@ -1,3 +1,5 @@
+# app/components/battery.py
+
 import psutil
 import subprocess
 import re
@@ -236,15 +238,29 @@ class BatteryPopupWidget(QWidget):
 class BatteryComponent(ClickableLabel):
     def __init__(self, settings, parent=None):
         super().__init__("Bat: --", parent, settings=settings)
+        self.settings = settings
         
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_status)
-        self.timer.start(settings.battery_poll_rate)
         
-        # Keep a worker instance ready
+        # Keep a worker instance ready for popup interactions
         self.plan_worker = PowerPlanWorker()
         
+        # Initial poll
         self.update_status()
+        self.timer.start(settings.battery_poll_rate)
+
+    # --- OPTIMIZATION HOOKS ---
+    def wake_up(self):
+        """Called by base.py when bar is visible."""
+        self.update_status() # Refresh immediately
+        if not self.timer.isActive():
+            self.timer.start(self.settings.battery_poll_rate)
+
+    def sleep(self):
+        """Called by base.py when bar hides."""
+        self.timer.stop()
+    # --------------------------
 
     def update_status(self):
         try:
@@ -275,6 +291,6 @@ class BatteryComponent(ClickableLabel):
             self.setText("Err")
 
     def get_popup_content(self):
-        # Return the widget instance, not a string
+        # We probably want to ensure the worker is ready, but it doesn't run continuously
         widget = BatteryPopupWidget(self.plan_worker)
         return "Power", widget
