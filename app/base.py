@@ -14,7 +14,7 @@ from .components.network import NetworkComponent
 from .components.battery import BatteryComponent
 from .components.settings_menu import SettingsComponent
 from .components.profile import ProfileComponent
-from .components.systray import SystemTrayComponent  # <--- IMPORT
+from .components.systray import SystemTrayComponent
 
 class SystemStatusBar(QWidget):
     def __init__(self, settings):
@@ -41,34 +41,47 @@ class SystemStatusBar(QWidget):
         self.screen = QApplication.primaryScreen()
         self.screen_width = self.screen.geometry().width()
 
+        # Calculate Total Window Height (Visual Bar + Top Margin)
+        self.total_window_height = self.cfg.bar_height + self.cfg.floating_margin_y
+
         # Window Flags
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(0, 0, self.screen_width, self.cfg.bar_height)
+        
+        # Set geometry to cover width, but height includes the top margin gap
+        self.setGeometry(0, 0, self.screen_width, self.total_window_height)
 
-        # Layout Container
+        # Layout Container (The Window holds the layout, the layout holds the visual container)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # --- KEY CHANGE: Add Margins to the Main Layout ---
+        # This squeezes the container away from edges
+        layout.setContentsMargins(
+            self.cfg.floating_margin_x, # Left
+            self.cfg.floating_margin_y, # Top
+            self.cfg.floating_margin_x, # Right
+            0                           # Bottom
+        )
         
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
         
-        # Layout for Left and Right items only
+        # Inner Layout for items
         inner = QHBoxLayout(self.container)
         inner.setContentsMargins(20, 0, 20, 0)
 
         # --- INSTANTIATE COMPONENTS ---
         self.comp_profile = ProfileComponent(self.cfg)
-        self.comp_clock = ClockComponent(self.cfg, parent=self.container) # Parent is container
-        self.comp_tray = SystemTrayComponent(self.cfg) # <--- INIT TRAY
+        self.comp_clock = ClockComponent(self.cfg, parent=self.container)
+        self.comp_tray = SystemTrayComponent(self.cfg)
         self.comp_audio = AudioComponent(self.cfg)
         self.comp_net = NetworkComponent(self.cfg)
         self.comp_bat = BatteryComponent(self.cfg)
         self.comp_settings = SettingsComponent(self.cfg)
         
-        # Connect Clickables to Popup Manager
+        # Connect Clickables
         self.comp_profile.clicked.connect(lambda: self.handle_popup(self.comp_profile))
-        self.comp_tray.clicked.connect(lambda: self.handle_popup(self.comp_tray)) # <--- CONNECT TRAY
+        self.comp_tray.clicked.connect(lambda: self.handle_popup(self.comp_tray))
         self.comp_audio.clicked.connect(lambda: self.handle_popup(self.comp_audio))
         self.comp_net.clicked.connect(lambda: self.handle_popup(self.comp_net))
         self.comp_bat.clicked.connect(lambda: self.handle_popup(self.comp_bat))
@@ -78,28 +91,26 @@ class SystemStatusBar(QWidget):
         inner.addWidget(self.comp_profile)
         
         # --- MIDDLE SPACER ---
-        # This pushes the left items to the left and right items to the right
         inner.addStretch()
 
         # --- RIGHT SIDE ---
-        # Note: Clock is NOT added to layout
-        inner.addWidget(self.comp_tray) # <--- ADD TO LAYOUT
+        inner.addWidget(self.comp_tray)
         inner.addWidget(self.comp_audio)
         inner.addWidget(self.comp_net)
         inner.addWidget(self.comp_bat)
         inner.addWidget(self.comp_settings)
 
-        # --- ABSOLUTE CLOCK POSITIONING ---
-        # Give the clock a fixed width (large enough to fit date/time)
+        # --- ABSOLUTE CLOCK POSITIONING (CENTERED) ---
         clock_width = 300 
         self.comp_clock.setFixedSize(clock_width, self.cfg.bar_height)
         
-        # Calculate center position
-        # x = (screen width - clock width) / 2
-        clock_x = (self.screen_width - clock_width) // 2
+        # Calculate visual container width based on margins
+        container_width = self.screen_width - (2 * self.cfg.floating_margin_x)
+        
+        # Center clock relative to the CONTAINER, not screen
+        clock_x = (container_width - clock_width) // 2
         self.comp_clock.move(clock_x, 0)
         
-        # Ensure clock is stacked above background but doesn't block layout events
         self.comp_clock.raise_()
 
         layout.addWidget(self.container)
@@ -112,13 +123,12 @@ class SystemStatusBar(QWidget):
         self.show()
 
     def apply_style(self):
+        # Updated CSS for rounded corners on ALL sides
         self.container.setStyleSheet(f"""
             QWidget#MainContainer {{
                 background-color: {self.cfg.bg_color};
-                border-bottom-left-radius: {self.cfg.border_radius}px;
-                border-bottom-right-radius: {self.cfg.border_radius}px;
+                border-radius: {self.cfg.border_radius}px;
                 border: 1px solid {self.cfg.border_color};
-                border-top: none;
             }}
             ClickableLabel {{
                 color: {self.cfg.text_color};
@@ -135,7 +145,6 @@ class SystemStatusBar(QWidget):
         """)
 
     def handle_popup(self, component):
-        """Calculates precise position relative to component and animates."""
         if self.active_popup: 
             self.active_popup.close()
             
@@ -149,7 +158,16 @@ class SystemStatusBar(QWidget):
         comp_w = component.width()
         
         target_x = comp_global_pos.x() + (comp_w // 2) - (popup_w // 2)
-        target_y = self.cfg.bar_height + 5 
+        
+        # --- FIX: Remove gap between bar and popup ---
+        # The BasePopupWidget has a 10px transparent margin (setContentsMargins)
+        # to hold the drop shadow. We subtract that margin so the visual frames touch.
+        # We assume common.py uses setContentsMargins(10, 10, 10, 10).
+        popup_shadow_margin = 10 
+        
+        # Visual Bottom of Bar = self.total_window_height
+        # Visual Top of Popup = target_y + popup_shadow_margin
+        target_y = self.total_window_height - popup_shadow_margin 
 
         if target_x + popup_w > self.screen_width - 10:
             target_x = self.screen_width - popup_w - 10
@@ -177,13 +195,13 @@ class SystemStatusBar(QWidget):
         except Exception:
             pass
 
-    # --- AUTO HIDE LOGIC ---
     def monitor_logic(self):
         if self.is_visible:
             self.force_z_order()
 
         cursor = QCursor.pos()
         
+        # Check if hovering over window (includes the margin gap, which makes interaction easier)
         is_hovering = self.geometry().contains(cursor)
         is_at_top_edge = cursor.y() < self.cfg.mouse_trigger_height
         is_popup_open = (self.active_popup and self.active_popup.isVisible())
@@ -234,12 +252,14 @@ class SystemStatusBar(QWidget):
         self.force_z_order()
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
-        self.anim.setEndValue(QRect(0, 0, self.screen_width, self.cfg.bar_height))
+        # Slide down to 0 (top of screen)
+        self.anim.setEndValue(QRect(0, 0, self.screen_width, self.total_window_height))
         self.anim.start()
 
     def slide_out(self):
         self.is_visible = False
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
-        self.anim.setEndValue(QRect(0, -self.cfg.bar_height, self.screen_width, self.cfg.bar_height))
+        # Slide up completely off screen (Height of bar + Height of margin)
+        self.anim.setEndValue(QRect(0, -self.total_window_height, self.screen_width, self.total_window_height))
         self.anim.start()
