@@ -23,3 +23,5 @@ class Settings:
         self.font_family = "Segoe UI"
         self.font_size = "13px"
         self.border_radius = 10
+
+        self.tray_ignore_list = ["SearchApp.exe", "ShellExperienceHost.exe"]

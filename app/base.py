@@ -1,3 +1,4 @@
+# app/base.py
 import win32gui
 import win32con
 import time
@@ -12,6 +13,8 @@ from .components.audio import AudioComponent
 from .components.network import NetworkComponent
 from .components.battery import BatteryComponent
 from .components.settings_menu import SettingsComponent
+from .components.profile import ProfileComponent
+from .components.systray import SystemTrayComponent  # <--- IMPORT
 
 class SystemStatusBar(QWidget):
     def __init__(self, settings):
@@ -38,7 +41,7 @@ class SystemStatusBar(QWidget):
         self.screen = QApplication.primaryScreen()
         self.screen_width = self.screen.geometry().width()
 
-        # Added Tool and WindowDoesNotAcceptFocus to help with overlay behavior
+        # Window Flags
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setGeometry(0, 0, self.screen_width, self.cfg.bar_height)
@@ -49,35 +52,55 @@ class SystemStatusBar(QWidget):
         
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
+        
+        # Layout for Left and Right items only
         inner = QHBoxLayout(self.container)
         inner.setContentsMargins(20, 0, 20, 0)
 
         # --- INSTANTIATE COMPONENTS ---
-        self.comp_clock = ClockComponent(self.cfg)
+        self.comp_profile = ProfileComponent(self.cfg)
+        self.comp_clock = ClockComponent(self.cfg, parent=self.container) # Parent is container
+        self.comp_tray = SystemTrayComponent(self.cfg) # <--- INIT TRAY
         self.comp_audio = AudioComponent(self.cfg)
         self.comp_net = NetworkComponent(self.cfg)
         self.comp_bat = BatteryComponent(self.cfg)
         self.comp_settings = SettingsComponent(self.cfg)
         
-        # Menu Label (Static)
-        lbl_menu = QLabel("⚡ System")
-        lbl_menu.setStyleSheet(f"color: {self.cfg.text_color}; font-family: {self.cfg.font_family};")
-
         # Connect Clickables to Popup Manager
+        self.comp_profile.clicked.connect(lambda: self.handle_popup(self.comp_profile))
+        self.comp_tray.clicked.connect(lambda: self.handle_popup(self.comp_tray)) # <--- CONNECT TRAY
         self.comp_audio.clicked.connect(lambda: self.handle_popup(self.comp_audio))
         self.comp_net.clicked.connect(lambda: self.handle_popup(self.comp_net))
         self.comp_bat.clicked.connect(lambda: self.handle_popup(self.comp_bat))
         self.comp_settings.clicked.connect(lambda: self.handle_popup(self.comp_settings))
 
-        # Add to Layout
-        inner.addWidget(lbl_menu)
-        inner.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
-        inner.addWidget(self.comp_clock)
-        inner.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+        # --- LEFT SIDE ---
+        inner.addWidget(self.comp_profile)
+        
+        # --- MIDDLE SPACER ---
+        # This pushes the left items to the left and right items to the right
+        inner.addStretch()
+
+        # --- RIGHT SIDE ---
+        # Note: Clock is NOT added to layout
+        inner.addWidget(self.comp_tray) # <--- ADD TO LAYOUT
         inner.addWidget(self.comp_audio)
         inner.addWidget(self.comp_net)
         inner.addWidget(self.comp_bat)
         inner.addWidget(self.comp_settings)
+
+        # --- ABSOLUTE CLOCK POSITIONING ---
+        # Give the clock a fixed width (large enough to fit date/time)
+        clock_width = 300 
+        self.comp_clock.setFixedSize(clock_width, self.cfg.bar_height)
+        
+        # Calculate center position
+        # x = (screen width - clock width) / 2
+        clock_x = (self.screen_width - clock_width) // 2
+        self.comp_clock.move(clock_x, 0)
+        
+        # Ensure clock is stacked above background but doesn't block layout events
+        self.comp_clock.raise_()
 
         layout.addWidget(self.container)
         self.apply_style()
@@ -119,21 +142,15 @@ class SystemStatusBar(QWidget):
         title, content = component.get_popup_content()
         self.active_popup = BasePopupWidget(title, content, self.cfg)
         
-        # 1. Force layout to calculate size
         self.active_popup.adjustSize()
         popup_w = self.active_popup.width()
         
-        # 2. Get Component Global Position
         comp_global_pos = component.mapToGlobal(QPoint(0, 0))
         comp_w = component.width()
         
-        # 3. Calculate Center X
         target_x = comp_global_pos.x() + (comp_w // 2) - (popup_w // 2)
-        
-        # 4. Y Position
         target_y = self.cfg.bar_height + 5 
 
-        # 5. Screen Bounds Check
         if target_x + popup_w > self.screen_width - 10:
             target_x = self.screen_width - popup_w - 10
         if target_x < 10:
@@ -141,9 +158,7 @@ class SystemStatusBar(QWidget):
             
         self.active_popup.move(target_x, target_y)
         
-        # Force popup on top as well
         self.active_popup.show()
-        # Apply the win32 Z-order fix to the popup too
         hwnd_popup = int(self.active_popup.winId())
         win32gui.SetWindowPos(hwnd_popup, win32con.HWND_TOPMOST, 0, 0, 0, 0,
                               win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
@@ -151,10 +166,6 @@ class SystemStatusBar(QWidget):
         self.active_popup.show_animated()
 
     def force_z_order(self):
-        """
-        Forcefully reapplies the HWND_TOPMOST flag. 
-        Windows likes to remove this flag when returning from sleep/lock.
-        """
         try:
             hwnd = int(self.winId())
             win32gui.SetWindowPos(
@@ -168,7 +179,6 @@ class SystemStatusBar(QWidget):
 
     # --- AUTO HIDE LOGIC ---
     def monitor_logic(self):
-        # 1. FIX: Enforce Always on Top if visible
         if self.is_visible:
             self.force_z_order()
 
@@ -196,7 +206,6 @@ class SystemStatusBar(QWidget):
 
         user_interacting = is_hovering or trigger_activated or is_popup_open
         
-        # Check if fullscreen app is blocking
         blocked = False
         fg = win32gui.GetForegroundWindow()
         if fg and fg != int(self.winId()):
@@ -222,7 +231,7 @@ class SystemStatusBar(QWidget):
 
     def slide_in(self):
         self.is_visible = True
-        self.force_z_order() # Ensure it's on top immediately upon sliding in
+        self.force_z_order()
         self.anim.stop()
         self.anim.setStartValue(self.geometry())
         self.anim.setEndValue(QRect(0, 0, self.screen_width, self.cfg.bar_height))

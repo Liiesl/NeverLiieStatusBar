@@ -1,14 +1,3 @@
-import comtypes
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-try:
-    from pycaw.constants import ERole
-except ImportError:
-    class ERole:
-        eConsole = 0
-        eMultimedia = 1
-        eCommunications = 2
-
 import time
 import io
 from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QSize, QByteArray, QBuffer, QIODevice
@@ -16,17 +5,9 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QFrame, QSizePolicy)
 from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPainterPath
 
-# --- WinRT Imports for Media Control ---
-try:
-    # pip install winrt-Windows.Media.Control winrt-Windows.Storage.Streams winrt-Windows.Foundation
-    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager, GlobalSystemMediaTransportControlsSessionPlaybackStatus
-    from winrt.windows.storage.streams import DataReader, InputStreamOptions
-    WINRT_AVAILABLE = True
-except ImportError as e:
-    WINRT_AVAILABLE = False
-    print(f"WinRT libraries not found: {e}. Media controls will be disabled.")
-
 import qtawesome as qta
+# Import consolidated API
+from .. import winapiref as wa
 from .common import ClickableLabel, ModernSlider, DeviceListItem, ACCENT_COLOR, TILE_INACTIVE, TILE_HOVER
 
 # --- HELPER FUNCTION FOR DEVICE NAMES ---
@@ -65,8 +46,12 @@ class AudioScanWorker(QThread):
     scan_finished = Signal(list, list) 
 
     def run(self):
+        if not wa.COM_AVAILABLE:
+            self.scan_finished.emit([], [])
+            return
+
         try:
-            comtypes.CoInitialize()
+            wa.comtypes.CoInitialize()
         except: pass
 
         out_list = []
@@ -74,7 +59,7 @@ class AudioScanWorker(QThread):
 
         try:
             # 1. RENDER (Output)
-            render_devs = AudioUtilities.GetAllDevices(data_flow=0)
+            render_devs = wa.AudioUtilities.GetAllDevices(data_flow=0)
             for dev in render_devs:
                 try:
                     state = dev.state.value if hasattr(dev.state, 'value') else dev.state
@@ -83,7 +68,7 @@ class AudioScanWorker(QThread):
                 except: continue
 
             # 2. CAPTURE (Input)
-            capture_devs = AudioUtilities.GetAllDevices(data_flow=1)
+            capture_devs = wa.AudioUtilities.GetAllDevices(data_flow=1)
             for dev in capture_devs:
                 try:
                     state = dev.state.value if hasattr(dev.state, 'value') else dev.state
@@ -98,7 +83,7 @@ class AudioScanWorker(QThread):
 
         self.scan_finished.emit(out_list, in_list)
         try:
-            comtypes.CoUninitialize()
+            wa.comtypes.CoUninitialize()
         except: pass
 
 # --- MEDIA CONTROL WORKER (WINRT) ---
@@ -117,18 +102,18 @@ class MediaWorker(QThread):
         self.current_thumbnail = b"" # Store the thumbnail bytes here
 
     def get_manager(self):
-        if not WINRT_AVAILABLE: return None
+        if not wa.WINRT_AVAILABLE: return None
         if self.manager is None:
             try:
                 # Synchronously wait for manager
-                self.manager = GlobalSystemMediaTransportControlsSessionManager.request_async().get()
+                self.manager = wa.GlobalSystemMediaTransportControlsSessionManager.request_async().get()
             except Exception as e:
                 print(f"WinRT Manager Request Failed: {e}")
                 self.manager = None
         return self.manager
 
     def run(self):
-        while self.running and WINRT_AVAILABLE:
+        while self.running and wa.WINRT_AVAILABLE:
             try:
                 mgr = self.get_manager()
                 if not mgr:
@@ -142,7 +127,7 @@ class MediaWorker(QThread):
                     # 1. Status
                     try:
                         info = session.get_playback_info()
-                        is_playing = (info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING)
+                        is_playing = (info.playback_status == wa.GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING)
                         self.status_updated.emit(is_playing)
                     except:
                         self.status_updated.emit(False)
@@ -156,7 +141,6 @@ class MediaWorker(QThread):
                             artist = props.artist if props.artist else ""
                             
                             # Check if title changed. If so, fetch NEW art.
-                            # If not, we keep self.current_thumbnail as is.
                             if title != self.last_title:
                                 self.last_title = title
                                 self.current_thumbnail = b"" # Reset first
@@ -166,7 +150,7 @@ class MediaWorker(QThread):
                                         stream = props.thumbnail.open_read_async().get()
                                         size = stream.size
                                         if size > 0:
-                                            reader = DataReader(stream.get_input_stream_at(0))
+                                            reader = wa.DataReader(stream.get_input_stream_at(0))
                                             reader.load_async(size).get()
                                             
                                             buffer = bytearray(size)
@@ -175,7 +159,7 @@ class MediaWorker(QThread):
                                     except Exception as e:
                                         print(f"Thumbnail fetch error: {e}")
                             
-                            # Emit the PERSISTED thumbnail data, not a temporary variable
+                            # Emit the PERSISTED thumbnail data
                             self.metadata_updated.emit(title, artist, self.current_thumbnail)
                         else:
                             self.metadata_updated.emit("Media Active", "Waiting for data...", b"")
@@ -378,13 +362,14 @@ class AudioComponent(ClickableLabel):
         self.update_status()
 
     def refresh_interfaces(self):
+        if not wa.COM_AVAILABLE: return
         try:
-            def_spk = AudioUtilities.GetSpeakers()
+            def_spk = wa.AudioUtilities.GetSpeakers()
             if def_spk:
                 self.current_output_id = def_spk.id
                 self.spk_interface = self._activate_interface(def_spk)
             
-            def_mic = AudioUtilities.GetMicrophone()
+            def_mic = wa.AudioUtilities.GetMicrophone()
             if def_mic:
                 self.current_input_id = def_mic.id
                 self.mic_interface = self._activate_interface(def_mic)
@@ -394,10 +379,10 @@ class AudioComponent(ClickableLabel):
         try:
             raw_dev = dev._dev if hasattr(dev, '_dev') else dev
             if hasattr(raw_dev, 'Activate'):
-                interface = raw_dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                interface = raw_dev.Activate(wa.IAudioEndpointVolume._iid_, wa.CLSCTX_ALL, None)
             else:
-                interface = raw_dev.activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            return interface.QueryInterface(IAudioEndpointVolume)
+                interface = raw_dev.activate(wa.IAudioEndpointVolume._iid_, wa.CLSCTX_ALL, None)
+            return interface.QueryInterface(wa.IAudioEndpointVolume)
         except: return None
 
     def on_scan_finished(self, out_list, in_list):
@@ -430,10 +415,12 @@ class AudioComponent(ClickableLabel):
             layout.addWidget(btn)
 
     def _on_device_selected(self, dev_id, is_input):
+        if not wa.COM_AVAILABLE: return
+
         # 1. Set Windows Default
         try:
-            roles = [ERole.eConsole, ERole.eMultimedia, ERole.eCommunications]
-            AudioUtilities.SetDefaultDevice(dev_id, roles=roles)
+            roles = [wa.ERole.eConsole, wa.ERole.eMultimedia, wa.ERole.eCommunications]
+            wa.AudioUtilities.SetDefaultDevice(dev_id, roles=roles)
         except Exception as e:
             print(f"Failed to switch device: {e}")
             return
@@ -620,7 +607,7 @@ class AudioComponent(ClickableLabel):
         self._repopulate_list(self.in_list_layout, self.input_devices_list, self.current_input_id, is_input=True)
 
         # --- SECTION 4: MEDIA CONTROL (IF AVAILABLE) ---
-        if WINRT_AVAILABLE:
+        if wa.WINRT_AVAILABLE:
             add_divider()
 
             lbl_media = QLabel("Media Player")

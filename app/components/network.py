@@ -6,26 +6,12 @@ import os
 import socket
 import time
 
-# --- DEBUGGING IMPORTS (For Focus Spy) ---
-import win32gui
-import win32process
-import psutil
-
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QThread
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, 
                                QScrollArea)
 
-# --- MODERN WINRT IMPORTS ---
-WINRT_AVAILABLE = False
-try:
-    from winrt.windows.devices.wifi import WiFiAdapter, WiFiReconnectionKind
-    from winrt.windows.security.credentials import PasswordCredential
-    import winrt.windows.foundation
-    import winrt.windows.foundation.collections # type: ignore
-    WINRT_AVAILABLE = True
-except ImportError as e:
-    print(f"CRITICAL: WinRT Import Failed: {e}")
-
+# Import consolidated API
+from .. import winapiref as wa
 from .common import ClickableLabel, WifiListItem
 
 # --- SILENT CONNECTIVITY CHECKER ---
@@ -62,7 +48,7 @@ class WinRTWorker(QObject):
         self.loop.run_forever()
 
     def start_init(self):
-        if WINRT_AVAILABLE:
+        if wa.WINRT_AVAILABLE:
             # Don't re-init if already done
             if self.adapter: 
                 return
@@ -72,9 +58,9 @@ class WinRTWorker(QObject):
 
     async def _init_adapter(self):
         try:
-            await WiFiAdapter.request_access_async()
+            await wa.WiFiAdapter.request_access_async()
             
-            devs = await WiFiAdapter.find_all_adapters_async()
+            devs = await wa.WiFiAdapter.find_all_adapters_async()
             
             if devs:
                 self.adapter = devs[0]
@@ -139,10 +125,10 @@ class WinRTWorker(QObject):
         
         cred = None
         if password:
-            cred = PasswordCredential()
+            cred = wa.PasswordCredential()
             cred.password = password
 
-        recon = WiFiReconnectionKind.AUTOMATIC
+        recon = wa.WiFiReconnectionKind.AUTOMATIC
         
         try:
             if cred:
@@ -293,7 +279,7 @@ class NetworkComponent(ClickableLabel):
             self.setText("Offline")
 
     def get_popup_content(self):
-        if not WINRT_AVAILABLE:
+        if not wa.WINRT_AVAILABLE:
             return "Error", "WinRT modules missing.\nSee console logs."
         
         # Pass the cache to the widget so it opens instantly

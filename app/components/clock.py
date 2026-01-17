@@ -1,12 +1,15 @@
 from datetime import datetime
 from PySide6.QtWidgets import QLabel
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 
 class ClockComponent(QLabel):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.setObjectName("ClockLabel")
-        # Specific styling for clock usually differs slightly
+        
+        # Center the text inside the label (important because label has fixed width now)
+        self.setAlignment(Qt.AlignCenter)
+        
         self.setStyleSheet(f"font-weight: bold; font-size: 14px; padding: 0 10px; color: {settings.text_color};")
         
         self.timer = QTimer(self)
