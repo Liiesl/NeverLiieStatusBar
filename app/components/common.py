@@ -76,14 +76,18 @@ class BasePopupWidget(QWidget):
         self.frame = QFrame()
         self.frame.setObjectName("PopupFrame")
         
-        # Windows 11 Dark Theme Style
+        # Windows 11 Theme Style (Using Config Settings)
         self.frame.setStyleSheet(f"""
             QFrame#PopupFrame {{
-                background-color: #242424; 
-                border: 1px solid #454545;
+                background-color: {settings.bg_color}; 
+                border: 1px solid {settings.border_color};
                 border-radius: 12px;
             }}
-            QLabel {{ color: #ffffff; border: none; font-family: 'Segoe UI'; }}
+            QLabel {{ 
+                color: {settings.text_color}; 
+                border: none; 
+                font-family: '{settings.font_family}'; 
+            }}
         """)
         
         # Drop Shadow
@@ -217,10 +221,6 @@ class WifiListItem(QWidget):
             btn_disc.clicked.connect(lambda: self.disconnect_requested.emit(self.network_obj))
             det_layout.addWidget(btn_disc)
         else:            
-            # THE FIX: 
-            # Original: self.txt_pass = ModernInput()
-            # New (Debug):
-            
             # Passing 'parent=self.details' prevents it from becoming a top-level window (popup)
             self.txt_pass = ModernInput(parent=self.details) 
             
