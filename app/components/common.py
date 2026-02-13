@@ -1,7 +1,8 @@
 import qtawesome as qta
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QSlider, QFrame, QToolTip, QGraphicsOpacityEffect,
-                               QGraphicsDropShadowEffect, QComboBox, QListView, QSizePolicy, QLineEdit)
+                               QGraphicsDropShadowEffect, QComboBox, QListView, QSizePolicy, 
+                               QLineEdit, QDialog)
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QPoint, QSize
 from PySide6.QtGui import QCursor, QColor
 import sys
@@ -166,10 +167,11 @@ class WifiListItem(QWidget):
     connect_requested = Signal(object, str) 
     disconnect_requested = Signal(object) 
 
-    def __init__(self, ssid, signal_bars, is_secure, is_connected, network_obj, parent=None):
+    def __init__(self, ssid, signal_bars, is_secure, is_connected, has_saved_profile, network_obj, parent=None):
         super().__init__(parent)
         self.network_obj = network_obj
         self.is_connected = is_connected
+        self.has_saved_profile = has_saved_profile
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -224,7 +226,8 @@ class WifiListItem(QWidget):
             # Passing 'parent=self.details' prevents it from becoming a top-level window (popup)
             self.txt_pass = ModernInput(parent=self.details) 
             
-            self.txt_pass.setVisible(is_secure)
+            # Hide password if no saved profile (show only for secure networks without saved profile)
+            self.txt_pass.setVisible(is_secure and not has_saved_profile)
             
             btn_conn = QPushButton("Connect")
             btn_conn.setCursor(Qt.PointingHandCursor)
@@ -514,3 +517,97 @@ class DeviceListItem(QPushButton):
                 background-color: #454545;
             }}
         """)
+
+class ConfirmationDialog(QDialog):
+    def __init__(self, title, message, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # Main Layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Content Frame
+        self.frame = QFrame()
+        self.frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_DARK};
+                border: 1px solid #555;
+                border-radius: 12px;
+            }}
+            QLabel {{
+                color: {TEXT_WHITE};
+                font-family: 'Segoe UI';
+                font-size: 13px;
+                border: none;
+            }}
+        """)
+        
+        # Drop Shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        self.frame.setGraphicsEffect(shadow)
+
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(20, 20, 20, 20)
+        frame_layout.setSpacing(15)
+
+        # Title
+        lbl_title = QLabel(f"<b>{title}</b>")
+        lbl_title.setAlignment(Qt.AlignCenter)
+        frame_layout.addWidget(lbl_title)
+
+        # Message
+        lbl_msg = QLabel(message)
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setAlignment(Qt.AlignCenter)
+        frame_layout.addWidget(lbl_msg)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        
+        self.btn_yes = QPushButton("Yes")
+        self.btn_no = QPushButton("Cancel")
+        
+        for btn in [self.btn_yes, self.btn_no]:
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {TILE_INACTIVE};
+                    color: white;
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 0 15px;
+                }}
+                QPushButton:hover {{ background-color: {TILE_HOVER}; }}
+            """)
+
+        # Highlight "Yes" button slightly
+        self.btn_yes.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ACCENT_COLOR};
+                color: black;
+                border: none;
+                border-radius: 4px;
+                padding: 0 15px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #50b0e0; }}
+        """)
+
+        self.btn_yes.clicked.connect(self.accept)
+        self.btn_no.clicked.connect(self.reject)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_yes)
+        btn_layout.addWidget(self.btn_no)
+        btn_layout.addStretch()
+
+        frame_layout.addLayout(btn_layout)
+        main_layout.addWidget(self.frame)

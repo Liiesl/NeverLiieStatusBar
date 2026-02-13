@@ -237,10 +237,136 @@ def unbox_winrt_str(winrt_obj):
     if winrt_obj is None: return ""
     if isinstance(winrt_obj, str): return winrt_obj
     try:
-        # Cast to IPropertyValue to extract the scalar value
         prop_val = IPropertyValue._from(winrt_obj)
         if prop_val.type == winrt_foundation.PropertyType.STRING:
             return prop_val.get_string()
     except:
         pass
     return ""
+
+# --- 4. WLAN API (WiFi Profiles) -------------------------------------------------
+WLAN_AVAILABLE = False
+wlanapi = None
+
+try:
+    wlanapi = ctypes.windll.wlanapi
+    WLAN_AVAILABLE = True
+except:
+    pass
+
+if WLAN_AVAILABLE:
+    WLAN_API_VERSION = (2, 0)
+    
+    class _GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", ctypes.c_ulong),
+            ("Data2", ctypes.c_ushort),
+            ("Data3", ctypes.c_ushort),
+            ("Data4", ctypes.c_ubyte * 8)
+        ]
+
+    class WLAN_INTERFACE_INFO(ctypes.Structure):
+        _fields_ = [
+            ("InterfaceGuid", _GUID),
+            ("strInterfaceDescription", ctypes.wintypes.WCHAR * 256),
+            ("State", ctypes.wintypes.DWORD)
+        ]
+
+    class WLAN_INTERFACE_INFO_LIST(ctypes.Structure):
+        _fields_ = [
+            ("dwNumberOfItems", ctypes.wintypes.DWORD),
+            ("dwIndex", ctypes.wintypes.DWORD),
+            ("InterfaceInfo", WLAN_INTERFACE_INFO * 1)
+        ]
+
+    class WLAN_PROFILE_INFO(ctypes.Structure):
+        _fields_ = [
+            ("strProfileName", ctypes.wintypes.WCHAR * 256),
+            ("dwFlags", ctypes.wintypes.DWORD)
+        ]
+
+    class WLAN_PROFILE_INFO_LIST(ctypes.Structure):
+        _fields_ = [
+            ("dwNumberOfItems", ctypes.wintypes.DWORD),
+            ("dwIndex", ctypes.wintypes.DWORD),
+            ("ProfileInfo", WLAN_PROFILE_INFO * 1)
+        ]
+
+    wlanapi.WlanOpenHandle.argtypes = [
+        ctypes.wintypes.DWORD, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.wintypes.DWORD), ctypes.POINTER(ctypes.wintypes.HANDLE)
+    ]
+    wlanapi.WlanOpenHandle.restype = ctypes.wintypes.DWORD
+
+    wlanapi.WlanCloseHandle.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_void_p]
+    wlanapi.WlanCloseHandle.restype = ctypes.wintypes.DWORD
+
+    wlanapi.WlanEnumInterfaces.argtypes = [
+        ctypes.wintypes.HANDLE, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.POINTER(WLAN_INTERFACE_INFO_LIST))
+    ]
+    wlanapi.WlanEnumInterfaces.restype = ctypes.wintypes.DWORD
+
+    wlanapi.WlanGetProfileList.argtypes = [
+        ctypes.wintypes.HANDLE, ctypes.POINTER(_GUID), ctypes.c_void_p,
+        ctypes.POINTER(ctypes.POINTER(WLAN_PROFILE_INFO_LIST))
+    ]
+    wlanapi.WlanGetProfileList.restype = ctypes.wintypes.DWORD
+
+    wlanapi.WlanFreeMemory.argtypes = [ctypes.c_void_p]
+    wlanapi.WlanFreeMemory.restype = None
+
+    _wlan_handle = None
+
+    def _get_wlan_handle():
+        global _wlan_handle
+        if _wlan_handle is not None:
+            return _wlan_handle
+        handle = ctypes.wintypes.HANDLE()
+        version = ctypes.wintypes.DWORD()
+        result = wlanapi.WlanOpenHandle(
+            WLAN_API_VERSION[0], None, ctypes.byref(version), ctypes.byref(handle)
+        )
+        if result == 0:
+            _wlan_handle = handle
+            return handle
+        return None
+
+    def get_saved_wifi_profiles():
+        handle = _get_wlan_handle()
+        if not handle:
+            return set()
+        
+        p_list = ctypes.POINTER(WLAN_INTERFACE_INFO_LIST)()
+        result = wlanapi.WlanEnumInterfaces(handle, None, ctypes.byref(p_list))
+        if result != 0:
+            return set()
+        
+        if p_list.contents.dwNumberOfItems == 0:
+            wlanapi.WlanFreeMemory(p_list)
+            return set()
+        
+        iface_guid = p_list.contents.InterfaceInfo[0].InterfaceGuid
+        wlanapi.WlanFreeMemory(p_list)
+        
+        p_profiles = ctypes.POINTER(WLAN_PROFILE_INFO_LIST)()
+        result = wlanapi.WlanGetProfileList(handle, ctypes.byref(iface_guid), None, ctypes.byref(p_profiles))
+        if result != 0:
+            return set()
+        
+        num = p_profiles.contents.dwNumberOfItems
+        profile_array = ctypes.cast(
+            ctypes.addressof(p_profiles.contents.ProfileInfo),
+            ctypes.POINTER(WLAN_PROFILE_INFO)
+        )
+        
+        profiles = set()
+        for i in range(num):
+            name = profile_array[i].strProfileName
+            profiles.add(name)
+        
+        wlanapi.WlanFreeMemory(p_profiles)
+        return profiles
+else:
+    def get_saved_wifi_profiles():
+        return set()

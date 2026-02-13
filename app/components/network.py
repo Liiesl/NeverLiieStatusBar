@@ -16,6 +16,15 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton,
 from .. import winapiref as wa
 from .common import ClickableLabel, WifiListItem
 
+# Get saved profiles once at module load
+_saved_profiles = None
+
+def _get_saved_profiles():
+    global _saved_profiles
+    if _saved_profiles is None:
+        _saved_profiles = wa.get_saved_wifi_profiles() if wa.WLAN_AVAILABLE else set()
+    return _saved_profiles
+
 # --- SILENT CONNECTIVITY CHECKER ---
 class ConnectivityWorker(QThread):
     status_changed = Signal(bool) 
@@ -120,8 +129,11 @@ class WinRTWorker(QObject):
                 auth_type = net.security_settings.network_authentication_type
                 is_secure = (auth_type > 1) 
                 is_connected = (ssid == connected_ssid)
+                
+                saved_profiles = _get_saved_profiles()
+                has_saved_profile = ssid in saved_profiles
 
-                results.append((ssid, signal, is_secure, is_connected, net))
+                results.append((ssid, signal, is_secure, is_connected, has_saved_profile, net))
             
             results.sort(key=lambda x: (not x[3], -x[1]))
             
@@ -151,7 +163,7 @@ class WinRTWorker(QObject):
             else:
                 result = await self.adapter.connect_async(net, recon)
 
-            if result.connection_status == 0: 
+            if result.connection_status == 1: 
                 self.status_msg.emit("Connected")
                 await asyncio.sleep(2) 
                 await self._scan()
@@ -249,8 +261,8 @@ class WifiPopupWidget(QWidget):
                 self.vbox_networks.insertWidget(0, lbl)
                 return
             
-            for i, (ssid, signal, secure, connected, net_obj) in enumerate(networks):
-                item = WifiListItem(ssid, signal, secure, connected, net_obj)
+            for i, (ssid, signal, secure, connected, has_saved, net_obj) in enumerate(networks):
+                item = WifiListItem(ssid, signal, secure, connected, has_saved, net_obj)
                 item.connect_requested.connect(self.worker.request_connect)
                 item.disconnect_requested.connect(self.worker.request_disconnect)
                 self.vbox_networks.insertWidget(self.vbox_networks.count()-1, item)
