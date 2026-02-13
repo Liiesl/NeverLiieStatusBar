@@ -4,9 +4,10 @@ import psutil
 import subprocess
 import re
 import os
-from PySide6.QtCore import QTimer, QThread, Signal, Qt, QSize
+from PySide6.QtCore import QTimer, QThread, Signal, Qt, QSize, QUrl
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QProgressBar, QFrame, QSizePolicy)
+from PySide6.QtGui import QDesktopServices
 import qtawesome as qta
 from .common import ClickableLabel, DeviceListItem, ACCENT_COLOR, TILE_INACTIVE, TILE_HOVER
 
@@ -119,7 +120,7 @@ class BatteryPopupWidget(QWidget):
         # 4. Footer (Settings Button)
         self.btn_settings = QPushButton("Battery Settings")
         self.btn_settings.setCursor(Qt.PointingHandCursor)
-        self.btn_settings.clicked.connect(lambda: os.system("start ms-settings:batterysaver"))
+        self.btn_settings.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("ms-settings:batterysaver")))
         self.btn_settings.setIcon(qta.icon("mdi.cog", color="white"))
         self.btn_settings.setStyleSheet(f"""
             QPushButton {{

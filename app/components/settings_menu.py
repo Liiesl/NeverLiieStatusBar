@@ -4,7 +4,8 @@ import sys
 import ctypes
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QLabel, QGridLayout, QApplication)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from .common import (ClickableLabel, ModernSlider, ActionTile, CompactToggleBtn,
                      ConfirmationDialog, TEXT_WHITE, TEXT_SUB)
 
@@ -126,6 +127,7 @@ class QuickSettingsUI(QWidget):
 
         # Settings Cog
         self.btn_settings = create_footer_btn("fa5s.cog", "All Settings")
+        self.btn_settings.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("ms-settings:")))
         footer.addWidget(self.btn_settings)
 
         power_layout.addLayout(footer)
