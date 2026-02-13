@@ -1,9 +1,12 @@
 import qtawesome as qta
+import os
+import sys
+import ctypes
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QLabel, QGridLayout)
+                               QLabel, QGridLayout, QApplication)
 from PySide6.QtCore import Qt
 from .common import (ClickableLabel, ModernSlider, ActionTile, CompactToggleBtn,
-                     TEXT_WHITE, TEXT_SUB)
+                     ConfirmationDialog, TEXT_WHITE, TEXT_SUB)
 
 class SettingsComponent(ClickableLabel):
     def __init__(self, settings, parent=None):
@@ -84,8 +87,7 @@ class QuickSettingsUI(QWidget):
         footer.setContentsMargins(0, 0, 0, 0) 
         footer.setSpacing(5)
 
-        # Example usage of creating a simple footer button vs the new toggle class
-        # (Keeping the helper here for simple triggers, but you can swap to CompactToggleBtn if needed)
+        # Helper to create consistent footer buttons
         def create_footer_btn(icon_name, tooltip):
             btn = QPushButton()
             btn.setIcon(qta.icon(icon_name, color=TEXT_WHITE))
@@ -104,9 +106,16 @@ class QuickSettingsUI(QWidget):
         self.btn_restart = create_footer_btn("fa5s.redo-alt", "Restart")
         self.btn_shutdown = create_footer_btn("fa5s.power-off", "Shutdown")
         
-        # Example: Using the NEW CompactToggleBtn for the "Disable" feature (since it's a state)
-        self.btn_disable = CompactToggleBtn("fa5s.eye-slash", "Disable Topbar", size=30)
+        # Changed from CompactToggleBtn to normal button using helper
+        self.btn_disable = create_footer_btn("fa5s.eye-slash", "Disable Topbar (Quit)")
         
+        # Connections with confirmations
+        self.btn_lock.clicked.connect(lambda: self.confirm_action("Lock"))
+        self.btn_sleep.clicked.connect(lambda: self.confirm_action("Sleep"))
+        self.btn_restart.clicked.connect(lambda: self.confirm_action("Restart"))
+        self.btn_shutdown.clicked.connect(lambda: self.confirm_action("Shutdown"))
+        self.btn_disable.clicked.connect(lambda: self.confirm_action("Disable"))
+
         footer.addWidget(self.btn_lock)
         footer.addWidget(self.btn_sleep)
         footer.addWidget(self.btn_restart)
@@ -121,3 +130,42 @@ class QuickSettingsUI(QWidget):
 
         power_layout.addLayout(footer)
         layout.addLayout(power_layout)
+
+    def confirm_action(self, action_type):
+        """Shows a confirmation dialog before executing a power action."""
+        msg_map = {
+            "Lock": "Are you sure you want to lock the computer?",
+            "Sleep": "Are you sure you want to put the computer to sleep?",
+            "Restart": "Are you sure you want to restart the computer?",
+            "Shutdown": "Are you sure you want to shut down the computer?",
+            "Disable": "Are you sure you want to quit the Topbar application?"
+        }
+        
+        dialog = ConfirmationDialog(action_type, msg_map.get(action_type, "Confirm action?"), self)
+        if dialog.exec():
+            self.execute_power_action(action_type)
+
+    def execute_power_action(self, action_type):
+        """Executes the actual system command."""
+        try:
+            if action_type == "Lock":
+                ctypes.windll.user32.LockWorkStation()
+            
+            elif action_type == "Sleep":
+                # Standard command to trigger sleep
+                os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+            
+            elif action_type == "Restart":
+                # /r = restart, /t 0 = immediately
+                os.system("shutdown /r /t 0")
+            
+            elif action_type == "Shutdown":
+                # /s = shutdown, /t 0 = immediately
+                os.system("shutdown /s /t 0")
+            
+            elif action_type == "Disable":
+                # Quit the application
+                QApplication.instance().quit()
+                
+        except Exception as e:
+            print(f"Error executing {action_type}: {e}")
