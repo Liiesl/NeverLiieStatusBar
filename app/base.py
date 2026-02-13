@@ -201,11 +201,16 @@ class SystemStatusBar(QWidget):
             pass
 
     def monitor_logic(self):
+        """
+        Logic to determine if the bar should slide in or out.
+        Optimization: We check ClassName instead of Geometry to determine blocking status.
+        """
         if self.is_visible:
             self.force_z_order()
 
         cursor = QCursor.pos()
         
+        # 1. User Interaction Checks
         is_hovering = self.geometry().contains(cursor)
         is_at_top_edge = cursor.y() < self.cfg.mouse_trigger_height
         is_popup_open = (self.active_popup and self.active_popup.isVisible())
@@ -228,14 +233,29 @@ class SystemStatusBar(QWidget):
 
         user_interacting = is_hovering or trigger_activated or is_popup_open
         
+        # 2. Window Blocking Logic
+        # If 'blocked' is True, the bar prefers to hide unless the user forces it (hover/edge).
         blocked = False
-        fg = win32gui.GetForegroundWindow()
-        if fg and fg != int(self.winId()):
-            if win32gui.GetClassName(fg) not in ["Progman", "WorkerW", "Shell_TrayWnd"]:
-                rect = win32gui.GetWindowRect(fg)
-                if (rect[3] - rect[1]) >= self.screen.geometry().height():
-                    blocked = True
         
+        try:
+            fg_hwnd = win32gui.GetForegroundWindow()
+            # Ensure we don't block ourselves
+            if fg_hwnd and fg_hwnd != int(self.winId()):
+                # Get the class name of the active window
+                cls_name = win32gui.GetClassName(fg_hwnd)
+                
+                # These classes represent the Desktop or Taskbar.
+                # If the active window is NOT one of these, it's an Application (Dialog, Game, Browser).
+                # If it's an Application, we consider the view 'blocked' (busy), so we hide.
+                system_classes = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"]
+                
+                if cls_name not in system_classes:
+                    blocked = True
+        except Exception:
+            # If any API fails, default to blocked to prevent accidental showing
+            blocked = True
+        
+        # Final Decision: Show if user interaction OR if sitting idly on the desktop (not blocked)
         should_show = user_interacting or not blocked
 
         if should_show:
