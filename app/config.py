@@ -13,7 +13,7 @@ class Settings:
         self.anim_duration = 300      # Slightly slower for smoother float
         self.monitor_interval = 200
         self.auto_hide_delay = 600
-        self.trigger_dwell_time = 400
+        self.trigger_dwell_time = 500
         
         # --- UPDATE INTERVALS ---
         self.audio_poll_rate = 500
