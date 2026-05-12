@@ -258,8 +258,14 @@ class LangPopupWidget(QWidget):
                 }}
             """)
 
-            btn.clicked.connect(lambda checked, h=hkl: _switch_layout(h))
+            btn.clicked.connect(lambda checked, h=hkl: self._on_select(h))
             self.vbox.insertWidget(self.vbox.count() - 1, btn)
+
+    def _on_select(self, hkl):
+        _switch_layout(hkl)
+        top = self.window()
+        if top and hasattr(top, 'close_animated'):
+            top.close_animated()
 
 
 class KeyboardLangComponent(ClickableLabel):
