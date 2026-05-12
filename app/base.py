@@ -14,6 +14,7 @@ from .components.battery import BatteryComponent
 from .components.settings_menu import SettingsComponent
 from .components.profile import ProfileComponent
 from .components.systray import SystemTrayComponent
+from .components.keyboard_lang import KeyboardLangComponent
 
 class SystemStatusBar(QWidget):
     def __init__(self, settings):
@@ -71,6 +72,7 @@ class SystemStatusBar(QWidget):
         # --- INSTANTIATE COMPONENTS ---
         self.comp_profile = ProfileComponent(self.cfg)
         self.comp_clock = ClockComponent(self.cfg, parent=self.container)
+        self.comp_lang = KeyboardLangComponent(self.cfg)
         self.comp_tray = SystemTrayComponent(self.cfg)
         self.comp_audio = AudioComponent(self.cfg)
         self.comp_net = NetworkComponent(self.cfg)
@@ -79,6 +81,7 @@ class SystemStatusBar(QWidget):
         
         # Connect Clickables
         self.comp_profile.clicked.connect(lambda: self.handle_popup(self.comp_profile))
+        self.comp_lang.clicked.connect(lambda: self.handle_popup(self.comp_lang))
         self.comp_tray.clicked.connect(lambda: self.handle_popup(self.comp_tray))
         self.comp_audio.clicked.connect(lambda: self.handle_popup(self.comp_audio))
         self.comp_net.clicked.connect(lambda: self.handle_popup(self.comp_net))
@@ -92,6 +95,7 @@ class SystemStatusBar(QWidget):
         inner.addStretch()
 
         # --- RIGHT SIDE ---
+        inner.addWidget(self.comp_lang)
         inner.addWidget(self.comp_tray)
         inner.addWidget(self.comp_audio)
         inner.addWidget(self.comp_net)
@@ -152,6 +156,13 @@ class SystemStatusBar(QWidget):
                 self.comp_audio.wake_up()
             else:
                 self.comp_audio.sleep()
+
+        # Keyboard Lang Component Optimization
+        if hasattr(self.comp_lang, 'wake_up') and hasattr(self.comp_lang, 'sleep'):
+            if visible:
+                self.comp_lang.wake_up()
+            else:
+                self.comp_lang.sleep()
 
         # TODO: Add other components here as we optimize them
         # if visible: self.comp_bat.wake_up() else: self.comp_bat.sleep()

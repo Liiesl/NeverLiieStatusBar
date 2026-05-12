@@ -19,6 +19,7 @@ class Settings:
         self.audio_poll_rate = 500
         self.clock_refresh_rate = 1000
         self.battery_poll_rate = 5000
+        self.lang_poll_rate = 1000
         
         # --- VISUALS / THEME ---
         self.bg_color = "rgba(25, 25, 25, 240)" # Slightly more opaque
