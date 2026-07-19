@@ -1,4 +1,5 @@
 use std::sync::{Mutex, OnceLock};
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 use windows::Win32::NetworkManagement::WiFi::*;
 use windows::Win32::Foundation::HANDLE;
@@ -115,6 +116,7 @@ fn is_battery_saver_enabled() -> bool {
             "-Command",
             "(Get-CimInstance -Namespace root\\cimv2 -ClassName Win32_Battery).BatteryStatus",
         ])
+        .creation_flags(0x08000000)
         .output()
         .map(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -131,6 +133,7 @@ fn set_battery_saver_enable(enable: bool) {
     };
     let _ = Command::new("powercfg")
         .args(["-setactive", guid])
+        .creation_flags(0x08000000)
         .output();
 }
 

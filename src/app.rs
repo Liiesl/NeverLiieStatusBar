@@ -732,6 +732,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PowerAction(action) => {
+            use std::os::windows::process::CommandExt;
             use std::process::Command;
             match action {
                 PowerAction::Lock => {
@@ -742,13 +743,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 PowerAction::Sleep => {
                     let _ = Command::new("rundll32.exe")
                         .args(["powrprof.dll,SetSuspendState", "0,1,0"])
+                        .creation_flags(0x08000000)
                         .spawn();
                 }
                 PowerAction::Restart => {
-                    let _ = Command::new("shutdown").args(["/r", "/t", "0"]).spawn();
+                    let _ = Command::new("shutdown")
+                        .args(["/r", "/t", "0"])
+                        .creation_flags(0x08000000)
+                        .spawn();
                 }
                 PowerAction::Shutdown => {
-                    let _ = Command::new("shutdown").args(["/s", "/t", "0"]).spawn();
+                    let _ = Command::new("shutdown")
+                        .args(["/s", "/t", "0"])
+                        .creation_flags(0x08000000)
+                        .spawn();
                 }
                 PowerAction::Quit => {
                     return iced::exit();
@@ -756,6 +764,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 PowerAction::OpenSettings => {
                     let _ = Command::new("cmd")
                         .args(["/c", "start", "ms-settings:"])
+                        .creation_flags(0x08000000)
                         .spawn();
                 }
             }
@@ -983,9 +992,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::ProfileOpenLauncher => {
+            use std::os::windows::process::CommandExt;
             use std::process::Command;
             let _ = Command::new("cmd")
                 .args(["/c", "start", ""])
+                .creation_flags(0x08000000)
                 .spawn();
             close_all_popups(state)
         }
