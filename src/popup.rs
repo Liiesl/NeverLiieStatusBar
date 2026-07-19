@@ -341,8 +341,7 @@ fn settings_popup_content(state: &crate::app::State) -> Element<'static, Message
             .color(text_color());
 
         let content = row![c]
-            .align_y(iced::Alignment::Center)
-            .height(Fill);
+            .align_y(iced::Alignment::Center);
 
         button(content)
             .padding(6)
