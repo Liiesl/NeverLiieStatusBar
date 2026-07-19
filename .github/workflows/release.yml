@@ -1,0 +1,59 @@
+name: Build & Package Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Build tray hook
+        run: cargo build -p nl-tray-hook --release
+
+      - name: Stage files
+        run: |
+          mkdir staging
+          Copy-Item target/release/neverliie-statusbar.exe staging/
+          Copy-Item target/release/nl_tray_hook.dll staging/
+
+      - name: Package with vpk
+        run: |
+          vpk pack `
+            -u NeverLiieStatusBar `
+            -v ${{ steps.version.outputs.VERSION }} `
+            -p ./staging `
+            -e neverliie-statusbar.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./Releases/NeverLiieStatusBar-win-Setup.exe
+            ./Releases/*.nupkg
+            ./Releases/RELEASES
+          generate_release_notes: true

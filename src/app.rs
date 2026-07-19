@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use iced::window::{self, Id as WindowId};
@@ -90,6 +90,11 @@ pub enum Message {
     KeyboardSwitchLayout(usize),
     ProfileLoadResult(profile_control::ProfileInfo),
     ProfileOpenLauncher,
+    UpdateCheckResult(Option<velopack::UpdateInfo>),
+    UpdateCheckAgain,
+    UpdateDownloadStart,
+    UpdateApply,
+    UpdateDismiss,
 }
 
 #[derive(Debug)]
@@ -154,6 +159,12 @@ pub struct State {
     pub profile_principal_name: String,
     pub profile_avatar_handle: Option<iced::widget::image::Handle>,
     pub profile_loaded: bool,
+
+    pub update_info: Option<velopack::UpdateInfo>,
+    pub update_downloading: bool,
+    pub update_download_progress: i16,
+    pub update_ready: bool,
+    pub update_rx: Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<i16>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +252,12 @@ pub fn boot() -> (State, Task<Message>) {
         profile_principal_name: String::new(),
         profile_avatar_handle: None,
         profile_loaded: false,
+
+        update_info: None,
+        update_downloading: false,
+        update_download_progress: 0,
+        update_ready: false,
+        update_rx: None,
     };
 
     let window_settings = window::Settings {
@@ -270,7 +287,16 @@ pub fn boot() -> (State, Task<Message>) {
         Message::ProfileLoadResult,
     );
 
-    (state, Task::batch([open_task.map(Message::WindowOpened), profile_task]))
+    let update_check_task = Task::perform(
+        async {
+            tokio::task::spawn_blocking(|| crate::updater::check_for_updates())
+                .await
+                .unwrap_or(None)
+        },
+        Message::UpdateCheckResult,
+    );
+
+    (state, Task::batch([open_task.map(Message::WindowOpened), profile_task, update_check_task]))
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -421,6 +447,27 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
+            if state.update_downloading {
+                if let Some(rx_arc) = state.update_rx.clone() {
+                    let result = rx_arc.lock().unwrap().try_recv();
+                    match result {
+                        Ok(val) => {
+                            state.update_download_progress = val;
+                            if val >= 100 {
+                                state.update_downloading = false;
+                                state.update_ready = true;
+                                state.update_rx = None;
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            state.update_downloading = false;
+                            state.update_ready = true;
+                            state.update_rx = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Task::none()
         }
         Message::Frame(now) => {
@@ -458,7 +505,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
             let close_task = close_all_popups(state);
 
-            let is_left = matches!(kind, PopupKind::Profile);
+            let is_left = matches!(kind, PopupKind::Profile | PopupKind::Update);
             let target_x = if is_left {
                 let comp_center = config::FLOATING_MARGIN_X + 20.0 + 40.0;
                 (comp_center - config::POPUP_WIDTH / 2.0).max(10.0)
@@ -942,6 +989,55 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 .spawn();
             close_all_popups(state)
         }
+        Message::UpdateCheckResult(info) => {
+            state.update_info = info;
+            Task::none()
+        }
+        Message::UpdateDownloadStart => {
+            if let Some(ref info) = state.update_info {
+                state.update_downloading = true;
+                state.update_download_progress = 0;
+                let (tx, rx) = std::sync::mpsc::channel();
+                state.update_rx = Some(Arc::new(std::sync::Mutex::new(rx)));
+                let info_clone = info.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::updater::download_updates(&info_clone, tx);
+                });
+            }
+            Task::none()
+        }
+        Message::UpdateApply => {
+            if let Some(ref info) = state.update_info {
+                let info_clone = info.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || crate::updater::apply_updates(&info_clone))
+                            .await
+                            .unwrap_or(false)
+                    },
+                    |_| Message::UpdateDismiss,
+                )
+            } else {
+                Task::none()
+            }
+        }
+        Message::UpdateDismiss => {
+            state.update_info = None;
+            state.update_ready = false;
+            state.update_download_progress = 0;
+            state.update_rx = None;
+            Task::none()
+        }
+        Message::UpdateCheckAgain => {
+            Task::perform(
+                async {
+                    tokio::task::spawn_blocking(|| crate::updater::check_for_updates())
+                        .await
+                        .unwrap_or(None)
+                },
+                Message::UpdateCheckResult,
+            )
+        }
     }
 }
 
@@ -976,6 +1072,7 @@ pub fn view(state: &State, window_id: WindowId) -> Element<'_, Message> {
                         state.battery_is_plugged,
                         &state.keyboard_lang_text,
                         &state.profile_display_name,
+                        state.update_info.is_some(),
                     ))
                         .on_enter(Message::BarMouseEnter)
                         .on_exit(Message::BarMouseExit)

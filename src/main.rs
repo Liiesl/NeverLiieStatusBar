@@ -13,13 +13,17 @@ mod network;
 mod popup;
 mod profile_control;
 mod systray;
+mod updater;
 mod wireless_control;
 mod win32;
 
 use iced::daemon;
 use lucide_icons::LUCIDE_FONT_BYTES;
+use velopack::VelopackApp;
 
 fn main() -> iced::Result {
+    VelopackApp::build().run();
+
     daemon(
         app::boot,
         app::update,

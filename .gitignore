@@ -1,5 +1,25 @@
+# Rust build artifacts
+target/
+*.pdb
+*.d
+*.exp
+*.lib
+
+# Release / packaging output
+Releases/
+staging/
+*.nupkg
+RELEASES
+releases.*.json
+assets.*.json
+
+# Python
 __pycache__/
 *.pyc
+
+# Config / misc
 *.yaml
 *.yml
+!.github/workflows/*.yml
 WINDOWS_API_REFERENCE.md
+NeverLiieStatusBar-rs

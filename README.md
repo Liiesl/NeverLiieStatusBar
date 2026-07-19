@@ -5,6 +5,7 @@ A lightweight, auto-hiding status bar for Windows built in Rust. Companion modul
 ## Features
 
 - **Auto-hide** — slides off-screen when an app is in the foreground; reappears on hover at the top edge (500ms dwell)
+- **Auto-update** — checks GitHub Releases for updates via [Velopack](https://velopack.io); download and restart in-app
 - **Profile** — shows Windows user name and avatar
 - **Clock** — real-time clock with date
 - **Audio** — speaker/mic volume, mute, device switching
@@ -22,6 +23,7 @@ A lightweight, auto-hiding status bar for Windows built in Rust. Companion modul
 - Windows 10/11
 - Rust (edition 2024)
 - Git
+- [.NET SDK 8+](https://dotnet.microsoft.com/download) (for `vpk` packaging tool)
 
 ## Build
 
@@ -46,20 +48,61 @@ cargo build -p nl-tray-hook --release
 
 Place `nl_tray_hook.dll` next to the main executable.
 
+## Packaging & Release
+
+Install the Velopack CLI tool:
+
+```bash
+dotnet tool install -g vpk
+```
+
+Package a release (stages only the exe + DLL, runs vpk):
+
+```bash
+package.bat
+```
+
+Or manually:
+
+```bash
+mkdir staging
+copy target\release\neverliie-statusbar.exe staging\
+copy target\release\nl_tray_hook.dll staging\
+vpk pack -u NeverLiieStatusBar -v 0.1.0 -p ./staging -e neverliie-statusbar.exe
+```
+
+Output in `Releases/`:
+- `NeverLiieStatusBar-win-Setup.exe` — standalone installer
+- `NeverLiieStatusBar-0.1.0-full.nupkg` — update package
+- `RELEASES` — updater manifest
+
+To publish, upload the files from `Releases/` to a GitHub Release tagged `v<version>`.
+
+### Automated Releases
+
+Pushing a `v*` tag triggers the GitHub Actions workflow which builds, packages, and creates a release automatically:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Runtime
 
 - The tray hook DLL must be accessible from Explorer's process for tray icons to work.
 - In release mode the app runs as a Windows GUI application (no console window).
+- On startup, the app checks GitHub Releases for updates. If an update is available, an arrow icon appears next to the profile in the bar. Clicking it opens the update popup where you can download and restart.
 
 ## Project Structure
 
 ```
 NeverLiieStatusBar/
 ├── src/                    # Main application
-│   ├── main.rs             # Entry point (iced daemon)
+│   ├── main.rs             # Entry point (iced daemon + VelopackApp init)
 │   ├── app.rs              # State, messages, update loop
+│   ├── updater.rs          # Velopack update check/download/apply
 │   ├── bar_ui.rs           # Bar layout
-│   ├── popup.rs            # Popup panel UIs
+│   ├── popup.rs            # Popup panel UIs (including update popup)
 │   ├── config.rs           # Dimensions, colors, timing
 │   ├── audio_control.rs    # Audio volume/mute/device
 │   ├── battery_control.rs  # Battery and power plans
@@ -74,6 +117,10 @@ NeverLiieStatusBar/
 ├── tray-hook/              # System tray hook DLL (cdylib)
 │   └── src/lib.rs
 ├── iced/                   # Vendored iced GUI framework (git submodule)
+├── .github/workflows/
+│   ├── release.yml         # Build + vpk package on tag push
+│   └── notify-parent.yml   # Submodule update notification
+├── package.bat             # Local packaging script
 └── Cargo.toml              # Workspace manifest
 ```
 
@@ -89,6 +136,7 @@ NeverLiieStatusBar/
 | [interprocess](https://github.com/kotauskas/interprocess) | Named pipe IPC |
 | [image](https://github.com/image-rs/image) | Avatar and icon processing |
 | [lucide-icons](https://github.com/nicholasgasior/iced-lucide-icons) | Icon font |
+| [velopack](https://github.com/velopack/velopack) | Auto-update and installer framework |
 
 ## Configuration
 

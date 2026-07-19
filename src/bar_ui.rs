@@ -15,8 +15,19 @@ pub fn bar(
     battery_is_plugged: bool,
     keyboard_lang: &str,
     profile_name: &str,
+    has_update: bool,
 ) -> Element<'static, Message> {
-    let left = clickable_widget_str(lucide_icons::Icon::User, Some(profile_name), PopupKind::Profile);
+    let profile = clickable_widget_str(lucide_icons::Icon::User, Some(profile_name), PopupKind::Profile);
+
+    let left: Element<'static, Message> = if has_update {
+        let update_widget = clickable_widget_accent(lucide_icons::Icon::ArrowUpCircle, PopupKind::Update);
+        row![profile, update_widget]
+            .spacing(0)
+            .align_y(iced::Alignment::Center)
+            .into()
+    } else {
+        profile
+    };
 
     let lang = clickable_widget_str(lucide_icons::Icon::Languages, Some(keyboard_lang), PopupKind::Keyboard);
     let tray_icon = if tray_open {
@@ -229,6 +240,55 @@ fn clickable_widget_str(
             .height(Fill)
             .into()
     };
+
+    button(content)
+        .padding(Padding::from([0, 8]))
+        .height(config::BAR_HEIGHT)
+        .style(|_theme: &Theme, status: button::Status| match status {
+            button::Status::Hovered => button::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    config::HOVER_BG[0],
+                    config::HOVER_BG[1],
+                    config::HOVER_BG[2],
+                    config::HOVER_BG[3],
+                ))),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
+                text_color: Color::WHITE,
+                ..Default::default()
+            },
+            _ => button::Style {
+                background: None,
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
+                text_color: Color::WHITE,
+                ..Default::default()
+            },
+        })
+        .on_press(Message::OpenPopup { kind })
+        .into()
+}
+
+fn clickable_widget_accent(
+    icon: lucide_icons::Icon,
+    kind: PopupKind,
+) -> Element<'static, Message> {
+    let accent = Color::from_rgba(96.0 / 255.0, 205.0 / 255.0, 255.0 / 255.0, 1.0);
+
+    let icon_char: char = icon.into();
+    let icon_text = text(icon_char.to_string())
+        .size(14)
+        .font(iced::Font::with_name("lucide"))
+        .color(accent);
+
+    let content: Element<'static, Message> = row![icon_text]
+        .align_y(iced::Alignment::Center)
+        .height(Fill)
+        .into();
 
     button(content)
         .padding(Padding::from([0, 8]))
