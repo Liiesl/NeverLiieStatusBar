@@ -5,6 +5,7 @@ use crate::app::Message;
 use crate::config;
 use crate::popup::PopupKind;
 
+#[allow(clippy::too_many_arguments)]
 pub fn bar(
     clock_text: &str,
     is_online: bool,
@@ -12,7 +13,7 @@ pub fn bar(
     speaker_volume: f32,
     speaker_muted: bool,
     battery_percent: u8,
-    battery_is_plugged: bool,
+    _battery_is_plugged: bool,
     keyboard_lang: &str,
     profile_name: &str,
     has_update: bool,
@@ -54,20 +55,10 @@ pub fn bar(
     let net_label = if is_online { Some("Online") } else { Some("Offline") };
     let net = clickable_widget(net_icon, net_label, PopupKind::Network);
 
-    let bat_icon = if battery_is_plugged {
-        if battery_percent >= 95 { lucide_icons::Icon::BatteryFull }
-        else if battery_percent >= 80 { lucide_icons::Icon::BatteryFull }
-        else if battery_percent >= 60 { lucide_icons::Icon::BatteryMedium }
-        else if battery_percent >= 40 { lucide_icons::Icon::BatteryMedium }
-        else { lucide_icons::Icon::BatteryLow }
-    } else {
-        if battery_percent >= 95 { lucide_icons::Icon::BatteryFull }
-        else if battery_percent >= 80 { lucide_icons::Icon::BatteryFull }
-        else if battery_percent >= 60 { lucide_icons::Icon::BatteryMedium }
+    let bat_icon = if battery_percent >= 80 { lucide_icons::Icon::BatteryFull }
         else if battery_percent >= 40 { lucide_icons::Icon::BatteryMedium }
         else if battery_percent >= 20 { lucide_icons::Icon::BatteryLow }
-        else { lucide_icons::Icon::BatteryWarning }
-    };
+        else { lucide_icons::Icon::BatteryWarning };
     let bat = clickable_widget_str(bat_icon, Some(&format!("{}%", battery_percent)), PopupKind::Battery);
     let settings = clickable_widget(lucide_icons::Icon::Settings, None, PopupKind::Settings);
 
@@ -277,7 +268,7 @@ fn clickable_widget_accent(
     icon: lucide_icons::Icon,
     kind: PopupKind,
 ) -> Element<'static, Message> {
-    let accent = Color::from_rgba(96.0 / 255.0, 205.0 / 255.0, 255.0 / 255.0, 1.0);
+    let accent = Color::from_rgba(96.0 / 255.0, 205.0 / 255.0, 1.0, 1.0);
 
     let icon_char: char = icon.into();
     let icon_text = text(icon_char.to_string())

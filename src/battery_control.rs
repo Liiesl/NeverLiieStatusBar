@@ -74,8 +74,8 @@ pub fn get_power_plans() -> Vec<PowerPlan> {
         let guid = parts[2].to_string();
 
         // Extract name between parentheses
-        if let Some(start) = line.find('(') {
-            if let Some(end) = line.find(')') {
+        if let Some(start) = line.find('(')
+            && let Some(end) = line.find(')') {
                 let name = line[start + 1..end].to_string();
                 let is_active = line.contains('*');
                 plans.push(PowerPlan {
@@ -84,7 +84,6 @@ pub fn get_power_plans() -> Vec<PowerPlan> {
                     is_active,
                 });
             }
-        }
     }
 
     plans

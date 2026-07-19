@@ -330,13 +330,13 @@ pub fn get_mic_volume() -> f32 {
 pub fn is_speaker_muted() -> bool {
     ensure_init();
     let guard = AUDIO_STATE.lock().unwrap_or_else(|e| e.into_inner());
-    guard.as_ref().map_or(false, |s| s.spk_muted)
+    guard.as_ref().is_some_and(|s| s.spk_muted)
 }
 
 pub fn is_mic_muted() -> bool {
     ensure_init();
     let guard = AUDIO_STATE.lock().unwrap_or_else(|e| e.into_inner());
-    guard.as_ref().map_or(false, |s| s.mic_muted)
+    guard.as_ref().is_some_and(|s| s.mic_muted)
 }
 
 pub fn set_speaker_volume(value: f32) {
@@ -425,6 +425,7 @@ fn sync_mic_state() {
     }
 }
 
+#[allow(dead_code)]
 pub fn sync_all() {
     ensure_init();
     sync_speaker_state();
@@ -520,15 +521,14 @@ async fn get_media_state_inner() -> MediaState {
         ..Default::default()
     };
 
-    if let Ok(info) = session.GetPlaybackInfo() {
-        if let Ok(status) = info.PlaybackStatus() {
+    if let Ok(info) = session.GetPlaybackInfo()
+        && let Ok(status) = info.PlaybackStatus() {
             state.is_playing =
                 status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
         }
-    }
 
-    if let Ok(props_op) = session.TryGetMediaPropertiesAsync() {
-        if let Ok(props) = props_op.await {
+    if let Ok(props_op) = session.TryGetMediaPropertiesAsync()
+        && let Ok(props) = props_op.await {
             state.title = props
                 .Title()
                 .ok()
@@ -544,7 +544,6 @@ async fn get_media_state_inner() -> MediaState {
                 state.thumbnail = fetch_thumbnail_bytes(&thumb_ref).await;
             }
         }
-    }
 
     state
 }
@@ -560,11 +559,10 @@ pub fn media_toggle_play_sync() {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession() {
-            if let Ok(op) = session.TryTogglePlayPauseAsync() {
+        if let Ok(session) = mgr.GetCurrentSession()
+            && let Ok(op) = session.TryTogglePlayPauseAsync() {
                 let _ = op.await;
             }
-        }
     });
 }
 
@@ -574,11 +572,10 @@ pub fn media_next_track_sync() {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession() {
-            if let Ok(op) = session.TrySkipNextAsync() {
+        if let Ok(session) = mgr.GetCurrentSession()
+            && let Ok(op) = session.TrySkipNextAsync() {
                 let _ = op.await;
             }
-        }
     });
 }
 
@@ -588,10 +585,9 @@ pub fn media_prev_track_sync() {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession() {
-            if let Ok(op) = session.TrySkipPreviousAsync() {
+        if let Ok(session) = mgr.GetCurrentSession()
+            && let Ok(op) = session.TrySkipPreviousAsync() {
                 let _ = op.await;
             }
-        }
     });
 }

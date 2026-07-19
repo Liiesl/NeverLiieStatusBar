@@ -118,6 +118,7 @@ pub fn set_brightness(percent: f32) {
     });
 }
 
+#[allow(dead_code)]
 pub fn sync_all() {
     if let Some(val) = wmi_get_brightness() {
         *BRIGHTNESS_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(val);

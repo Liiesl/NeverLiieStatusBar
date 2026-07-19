@@ -16,6 +16,7 @@ pub struct IconEventData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[allow(clippy::enum_variant_names)]
 pub enum Win32TrayEvent {
     IconAdd { data: IconEventData },
     IconUpdate { data: IconEventData },

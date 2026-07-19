@@ -52,6 +52,8 @@ pub struct SystemTrayIcon {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+#[allow(clippy::enum_variant_names)]
 pub enum TrayIconAction {
     LeftClick,
     LeftDoubleClick,
@@ -117,11 +119,10 @@ impl SystemTrayManager {
         };
 
         // Skip Windows system tray icons (volume, network, battery, etc.)
-        if let SysTrayIconId::Guid(guid) = &icon_id {
-            if EXCLUDED_GUIDS.iter().any(|g| *g == guid.to_string()) {
+        if let SysTrayIconId::Guid(guid) = &icon_id
+            && EXCLUDED_GUIDS.iter().any(|g| *g == guid.to_string()) {
                 return;
             }
-        }
 
         // Deduplicate by HWND: if another icon with the same HWND exists (different UID),
         // remove the stale one. Windows/Explorer groups tray icons by process (same HWND),
@@ -318,11 +319,14 @@ type CallWndProcFn = unsafe extern "system" fn(
 ) -> windows::Win32::Foundation::LRESULT;
 
 pub struct HookLoader {
+    #[allow(dead_code)]
     hook: Option<OwnedHook>,
+    #[allow(dead_code)]
     dll: Option<OwnedDll>,
 }
 
 struct OwnedHook(windows::Win32::UI::WindowsAndMessaging::HHOOK);
+#[allow(dead_code)]
 struct OwnedDll(windows::Win32::Foundation::HMODULE);
 
 impl Drop for OwnedHook {

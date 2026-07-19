@@ -6,7 +6,7 @@ use crate::config;
 use crate::network;
 use crate::systray::{SystemTrayManager, TrayIconAction};
 
-const ACCENT: [f32; 4] = [96.0 / 255.0, 205.0 / 255.0, 255.0 / 255.0, 1.0];
+const ACCENT: [f32; 4] = [96.0 / 255.0, 205.0 / 255.0, 1.0, 1.0];
 const TILE_BG: [f32; 4] = [62.0 / 255.0, 62.0 / 255.0, 62.0 / 255.0, 1.0];
 const TILE_HOVER: [f32; 4] = [78.0 / 255.0, 78.0 / 255.0, 78.0 / 255.0, 1.0];
 const TEXT_SUB: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
@@ -518,7 +518,7 @@ fn network_item(net: &network::NetworkInfo, password_value: &str, is_expanded: b
             button::Style {
                 background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
-                    radius: if expanded { 6.0 } else { 6.0 }.into(),
+                    radius: 6.0.into(),
                     width: 1.0,
                     color: if is_connected {
                         accent_color()
@@ -758,8 +758,6 @@ fn volume_icon_char(volume: f32, muted: bool) -> lucide_icons::Icon {
         lucide_icons::Icon::VolumeX
     } else if volume < 30.0 {
         lucide_icons::Icon::Volume1
-    } else if volume < 70.0 {
-        lucide_icons::Icon::Volume2
     } else {
         lucide_icons::Icon::Volume2
     }
@@ -988,7 +986,7 @@ fn audio_popup_content(state: &crate::app::State) -> Element<'static, Message> {
             Some(Message::ToggleSpeakerMute),
         ),
         modern_slider(
-            mic_icon_char.into(),
+            mic_icon_char,
             state.mic_volume,
             Message::SettingsMicVolume,
             Some(Message::ToggleMicMute),
@@ -1211,7 +1209,7 @@ fn initials_avatar(name: &str, size: f32) -> Element<'static, Message> {
 }
 
 fn compute_initials(name: &str) -> String {
-    let parts: Vec<&str> = name.trim().split_whitespace().collect();
+    let parts: Vec<&str> = name.split_whitespace().collect();
     if parts.len() >= 2 {
         let first = parts[0].chars().next().unwrap_or('?');
         let second = parts[1].chars().next().unwrap_or('?');
@@ -1624,7 +1622,7 @@ fn update_popup_content(state: &crate::app::State) -> Element<'static, Message> 
             .font(iced::Font::with_name("lucide"))
             .color(accent_color());
 
-        let pct = state.update_download_progress.min(100).max(0) as u32;
+        let pct = state.update_download_progress.clamp(0, 100) as u32;
 
         let dl_title = text(format!("Downloading v{}", state.update_info.as_ref().map(|i| i.TargetFullRelease.Version.as_str()).unwrap_or("...")))
             .size(14)

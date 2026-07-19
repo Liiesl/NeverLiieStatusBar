@@ -30,6 +30,7 @@ pub enum PowerAction {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     MonitorTick,
     Frame(Instant),
@@ -90,7 +91,7 @@ pub enum Message {
     KeyboardSwitchLayout(usize),
     ProfileLoadResult(profile_control::ProfileInfo),
     ProfileOpenLauncher,
-    UpdateCheckResult(Option<velopack::UpdateInfo>),
+    UpdateCheckResult(Box<Option<velopack::UpdateInfo>>),
     UpdateCheckAgain,
     UpdateDownloadStart,
     UpdateApply,
@@ -140,6 +141,7 @@ pub struct State {
     pub bluetooth_enabled: bool,
     pub airplane_enabled: bool,
     pub battery_saver_enabled: bool,
+    #[allow(dead_code)]
     pub settings_synced: bool,
     pub is_online: bool,
     pub networks: Vec<network::NetworkInfo>,
@@ -276,7 +278,7 @@ pub fn boot() -> (State, Task<Message>) {
 
     let profile_task = Task::perform(
         async {
-            tokio::task::spawn_blocking(|| profile_control::get_profile_info())
+            tokio::task::spawn_blocking(profile_control::get_profile_info)
                 .await
                 .unwrap_or_else(|_| profile_control::ProfileInfo {
                     display_name: "User".to_string(),
@@ -289,11 +291,11 @@ pub fn boot() -> (State, Task<Message>) {
 
     let update_check_task = Task::perform(
         async {
-            tokio::task::spawn_blocking(|| crate::updater::check_for_updates())
+            tokio::task::spawn_blocking(crate::updater::check_for_updates)
                 .await
                 .unwrap_or(None)
         },
-        Message::UpdateCheckResult,
+        |info| Message::UpdateCheckResult(Box::new(info)),
     );
 
     (state, Task::batch([open_task.map(Message::WindowOpened), profile_task, update_check_task]))
@@ -431,8 +433,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if state.visible && state.hide_timer_start.is_none() {
                     state.hide_timer_start = Some(Instant::now());
                 }
-                if let Some(start) = state.hide_timer_start {
-                    if start.elapsed() >= config::AUTO_HIDE_DELAY {
+                if let Some(start) = state.hide_timer_start
+                    && start.elapsed() >= config::AUTO_HIDE_DELAY {
                         state.hide_timer_start = None;
                         if state.visible && state.slide.is_none() {
                             state.visible = false;
@@ -445,10 +447,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                         return close_all_popups(state);
                     }
-                }
             }
-            if state.update_downloading {
-                if let Some(rx_arc) = state.update_rx.clone() {
+            if state.update_downloading
+                && let Some(rx_arc) = state.update_rx.clone() {
                     let result = rx_arc.lock().unwrap().try_recv();
                     match result {
                         Ok(val) => {
@@ -467,7 +468,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         _ => {}
                     }
                 }
-            }
             Task::none()
         }
         Message::Frame(now) => {
@@ -540,7 +540,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.network_status = "Scanning...".to_string();
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| network::sync_scan())
+                        tokio::task::spawn_blocking(network::sync_scan)
                             .await
                             .unwrap_or_default()
                     },
@@ -550,7 +550,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Audio) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| audio_control::scan_audio_devices())
+                        tokio::task::spawn_blocking(audio_control::scan_audio_devices)
                             .await
                             .unwrap_or_default()
                     },
@@ -560,7 +560,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Battery) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| battery_control::get_power_plans())
+                        tokio::task::spawn_blocking(battery_control::get_power_plans)
                             .await
                             .unwrap_or_default()
                     },
@@ -570,7 +570,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Keyboard) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| keyboard_control::get_all_layouts())
+                        tokio::task::spawn_blocking(keyboard_control::get_all_layouts)
                             .await
                             .unwrap_or_default()
                     },
@@ -627,7 +627,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::AudioScanDevices => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| audio_control::scan_audio_devices())
+                    tokio::task::spawn_blocking(audio_control::scan_audio_devices)
                         .await
                         .unwrap_or_default()
                 },
@@ -661,10 +661,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaTogglePlay => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| audio_control::media_toggle_play_sync())
+                    tokio::task::spawn_blocking(audio_control::media_toggle_play_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(|| audio_control::get_media_state_sync())
+                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -674,10 +674,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaNextTrack => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| audio_control::media_next_track_sync())
+                    tokio::task::spawn_blocking(audio_control::media_next_track_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(|| audio_control::get_media_state_sync())
+                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -687,10 +687,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaPrevTrack => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| audio_control::media_prev_track_sync())
+                    tokio::task::spawn_blocking(audio_control::media_prev_track_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(|| audio_control::get_media_state_sync())
+                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -700,7 +700,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| audio_control::get_media_state_sync())
+                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -737,7 +737,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match action {
                 PowerAction::Lock => {
                     unsafe {
-                        windows::Win32::System::Shutdown::LockWorkStation();
+                        let _ = windows::Win32::System::Shutdown::LockWorkStation();
                     }
                 }
                 PowerAction::Sleep => {
@@ -788,7 +788,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::NetworkStatusTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| network::check_internet())
+                    tokio::task::spawn_blocking(network::check_internet)
                         .await
                         .unwrap_or(false)
                 },
@@ -803,7 +803,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.network_status = "Scanning...".to_string();
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| network::sync_scan())
+                    tokio::task::spawn_blocking(network::sync_scan)
                         .await
                         .unwrap_or_default()
                 },
@@ -855,7 +855,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.wifi_password_input = String::new();
                 return Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| network::sync_scan())
+                        tokio::task::spawn_blocking(network::sync_scan)
                             .await
                             .unwrap_or_default()
                     },
@@ -870,7 +870,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.network_status = "Disconnecting...".to_string();
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| network::sync_disconnect())
+                    tokio::task::spawn_blocking(network::sync_disconnect)
                         .await
                         .unwrap_or(false)
                 },
@@ -882,7 +882,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.network_status = "Disconnected".to_string();
                 return Task::perform(
                     async {
-                        tokio::task::spawn_blocking(|| network::sync_scan())
+                        tokio::task::spawn_blocking(network::sync_scan)
                             .await
                             .unwrap_or_default()
                     },
@@ -896,7 +896,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::BatteryTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| battery_control::get_battery_info())
+                    tokio::task::spawn_blocking(battery_control::get_battery_info)
                         .await
                         .unwrap_or(None)
                 },
@@ -914,7 +914,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PowerPlanList => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| battery_control::get_power_plans())
+                    tokio::task::spawn_blocking(battery_control::get_power_plans)
                         .await
                         .unwrap_or_default()
                 },
@@ -931,7 +931,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     tokio::task::spawn_blocking(move || battery_control::set_power_plan(&guid))
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(|| battery_control::get_power_plans())
+                    tokio::task::spawn_blocking(battery_control::get_power_plans)
                         .await
                         .unwrap_or_default()
                 },
@@ -941,7 +941,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::KeyboardTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| keyboard_control::get_active_layout())
+                    tokio::task::spawn_blocking(keyboard_control::get_active_layout)
                         .await
                         .unwrap_or(None)
                 },
@@ -958,7 +958,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::KeyboardLayoutList => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| keyboard_control::get_all_layouts())
+                    tokio::task::spawn_blocking(keyboard_control::get_all_layouts)
                         .await
                         .unwrap_or_default()
                 },
@@ -1001,7 +1001,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             close_all_popups(state)
         }
         Message::UpdateCheckResult(info) => {
-            state.update_info = info;
+            state.update_info = *info;
             Task::none()
         }
         Message::UpdateDownloadStart => {
@@ -1042,11 +1042,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::UpdateCheckAgain => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(|| crate::updater::check_for_updates())
+                    tokio::task::spawn_blocking(crate::updater::check_for_updates)
                         .await
                         .unwrap_or(None)
                 },
-                Message::UpdateCheckResult,
+                |info| Message::UpdateCheckResult(Box::new(info)),
             )
         }
     }

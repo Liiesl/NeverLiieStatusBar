@@ -73,13 +73,11 @@ async fn set_radio_state(kind: RadioKind, new_state: RadioState) -> bool {
     };
 
     for i in 0..radios.Size().unwrap_or(0) {
-        if let Ok(radio) = radios.GetAt(i) {
-            if radio.Kind().unwrap_or(RadioKind(0)) == kind {
-                if let Ok(op) = radio.SetStateAsync(new_state) {
-                    return op.await.map(|_| true).unwrap_or(false);
-                }
+        if let Ok(radio) = radios.GetAt(i)
+            && radio.Kind().unwrap_or(RadioKind(0)) == kind
+            && let Ok(op) = radio.SetStateAsync(new_state) {
+                return op.await.map(|_| true).unwrap_or(false);
             }
-        }
     }
     false
 }
@@ -97,13 +95,11 @@ async fn set_all_radios(new_state: RadioState) -> bool {
     for i in 0..radios.Size().unwrap_or(0) {
         if let Ok(radio) = radios.GetAt(i) {
             let kind = radio.Kind().unwrap_or(RadioKind(0));
-            if kind == RadioKind::WiFi || kind == RadioKind::Bluetooth || kind == RadioKind::MobileBroadband {
-                if let Ok(op) = radio.SetStateAsync(new_state) {
-                    if op.await.is_ok() {
-                        any_changed = true;
-                    }
+            if (kind == RadioKind::WiFi || kind == RadioKind::Bluetooth || kind == RadioKind::MobileBroadband)
+                && let Ok(op) = radio.SetStateAsync(new_state)
+                && op.await.is_ok() {
+                    any_changed = true;
                 }
-            }
         }
     }
     any_changed
