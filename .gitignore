@@ -2,4 +2,4 @@ __pycache__/
 *.pyc
 *.yaml
 *.yml
-*.md
+WINDOWS_API_REFERENCE.md
