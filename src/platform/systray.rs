@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 use iced::widget::image::Handle as ImageHandle;
 
-use crate::ipc::IconEventData;
+use crate::platform::ipc::IconEventData;
 
 // Windows system tray icon GUIDs to exclude (managed by Windows, not apps)
 const EXCLUDED_GUIDS: &[&str] = &[
@@ -100,13 +100,13 @@ impl SystemTrayManager {
         None
     }
 
-    pub fn handle_event(&mut self, event: crate::ipc::Win32TrayEvent) {
+    pub fn handle_event(&mut self, event: crate::platform::ipc::Win32TrayEvent) {
         match event {
-            crate::ipc::Win32TrayEvent::IconAdd { data }
-            | crate::ipc::Win32TrayEvent::IconUpdate { data } => {
+            crate::platform::ipc::Win32TrayEvent::IconAdd { data }
+            | crate::platform::ipc::Win32TrayEvent::IconUpdate { data } => {
                 self.handle_add_or_update(data);
             }
-            crate::ipc::Win32TrayEvent::IconRemove { data } => {
+            crate::platform::ipc::Win32TrayEvent::IconRemove { data } => {
                 self.handle_remove(data);
             }
         }
@@ -142,7 +142,7 @@ impl SystemTrayManager {
         }
 
         let (icon_rgba, icon_width, icon_height) = if let Some(handle) = data.icon_handle {
-            if let Some((rgba, w, h)) = crate::icon_utils::hicon_to_rgba(handle) {
+            if let Some((rgba, w, h)) = crate::platform::icon_utils::hicon_to_rgba(handle) {
                 (Some(rgba), w, h)
             } else {
                 (None, 0, 0)

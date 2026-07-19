@@ -3,7 +3,7 @@ use iced::{Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
 use crate::config;
-use crate::popup::PopupKind;
+use crate::ui::popup::PopupKind;
 
 #[allow(clippy::too_many_arguments)]
 pub fn bar(
