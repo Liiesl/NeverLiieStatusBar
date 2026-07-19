@@ -1,0 +1,71 @@
+[package]
+name = "neverliie-statusbar"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [".", "tray-hook"]
+
+[dependencies]
+iced = { version = "0.14", features = ["tokio", "image-without-codecs"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+lucide-icons = { version = "1.24.0", features = ["iced"] }
+chrono = "0.4"
+uuid = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+interprocess = { version = "2", features = ["tokio"] }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_Power",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Shutdown",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Wmi",
+    "Win32_Globalization",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "Devices_Radios",
+    "Devices_WiFi",
+    "Networking_Connectivity",
+    "Security_Credentials",
+    "Media_Control",
+    "Storage_Streams",
+    "Foundation_Collections",
+    "System",
+    "Win32_Security_Authentication_Identity",
+] }
+windows-core = "0.62"
+windows-collections = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[patch.crates-io]
+iced = { path = "iced" }
+iced_core = { path = "iced/core" }
+iced_runtime = { path = "iced/runtime" }
+iced_futures = { path = "iced/futures" }
+iced_graphics = { path = "iced/graphics" }
+iced_renderer = { path = "iced/renderer" }
+iced_tiny_skia = { path = "iced/tiny_skia" }
+iced_wgpu = { path = "iced/wgpu" }
+iced_winit = { path = "iced/winit" }
+iced_debug = { path = "iced/debug" }
+iced_widget = { path = "iced/widget" }
+iced_program = { path = "iced/program" }
