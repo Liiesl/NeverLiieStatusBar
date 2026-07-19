@@ -5,19 +5,19 @@ use std::time::{Duration, Instant};
 use iced::window::{self, Id as WindowId};
 use iced::{Element, Point, Size, Subscription, Task, time};
 
-use crate::audio_control;
-use crate::bar_ui;
-use crate::battery_control;
-use crate::brightness_control;
 use crate::config;
-use crate::ipc::{TrayIpcServer, Win32TrayEvent};
-use crate::keyboard_control;
-use crate::network;
-use crate::popup::PopupKind;
-use crate::profile_control;
-use crate::systray::{SysTrayIconId, SystemTrayManager, TrayIconAction};
-use crate::wireless_control;
-use crate::win32;
+use crate::platform::ipc::{TrayIpcServer, Win32TrayEvent};
+use crate::platform::systray::{SysTrayIconId, SystemTrayManager, TrayIconAction};
+use crate::platform::win32;
+use crate::services::audio;
+use crate::services::battery;
+use crate::services::brightness;
+use crate::services::keyboard;
+use crate::services::network;
+use crate::services::profile;
+use crate::services::wireless;
+use crate::ui::bar;
+use crate::ui::popup::PopupKind;
 
 #[derive(Debug, Clone)]
 pub enum PowerAction {
@@ -55,14 +55,14 @@ pub enum Message {
     ToggleSpeakerMute,
     ToggleMicMute,
     AudioScanDevices,
-    AudioScanResult(Vec<audio_control::AudioDevice>, Vec<audio_control::AudioDevice>),
+    AudioScanResult(Vec<audio::AudioDevice>, Vec<audio::AudioDevice>),
     AudioSelectDevice { device_id: String, is_input: bool },
     AudioSelectDeviceResult(bool),
     MediaTick,
     MediaTogglePlay,
     MediaNextTrack,
     MediaPrevTrack,
-    MediaStateResult(audio_control::MediaState),
+    MediaStateResult(audio::MediaState),
     ToggleWifi,
     ToggleBluetooth,
     ToggleAirplane,
@@ -80,16 +80,16 @@ pub enum Message {
     NetworkDisconnect,
     NetworkDisconnectResult(bool),
     BatteryTick,
-    BatteryPollResult(Option<battery_control::BatteryInfo>),
+    BatteryPollResult(Option<battery::BatteryInfo>),
     PowerPlanList,
-    PowerPlanListResult(Vec<battery_control::PowerPlan>),
+    PowerPlanListResult(Vec<battery::PowerPlan>),
     PowerPlanSwitch(String),
     KeyboardTick,
-    KeyboardPollResult(Option<keyboard_control::KeyboardLayout>),
+    KeyboardPollResult(Option<keyboard::KeyboardLayout>),
     KeyboardLayoutList,
-    KeyboardLayoutListResult(Vec<keyboard_control::KeyboardLayout>),
+    KeyboardLayoutListResult(Vec<keyboard::KeyboardLayout>),
     KeyboardSwitchLayout(usize),
-    ProfileLoadResult(profile_control::ProfileInfo),
+    ProfileLoadResult(profile::ProfileInfo),
     ProfileOpenLauncher,
     UpdateCheckResult(Box<Option<velopack::UpdateInfo>>),
     UpdateCheckAgain,
@@ -128,8 +128,8 @@ pub struct State {
     pub brightness: f32,
     pub speaker_muted: bool,
     pub mic_muted: bool,
-    pub output_devices: Vec<audio_control::AudioDevice>,
-    pub input_devices: Vec<audio_control::AudioDevice>,
+    pub output_devices: Vec<audio::AudioDevice>,
+    pub input_devices: Vec<audio::AudioDevice>,
     pub current_output_device_id: Option<String>,
     pub current_input_device_id: Option<String>,
     pub media_title: String,
@@ -151,9 +151,9 @@ pub struct State {
     pub battery_percent: u8,
     pub battery_is_plugged: bool,
     pub battery_secs_left: i32,
-    pub battery_plans: Vec<battery_control::PowerPlan>,
+    pub battery_plans: Vec<battery::PowerPlan>,
     pub keyboard_lang_text: String,
-    pub keyboard_layouts: Vec<keyboard_control::KeyboardLayout>,
+    pub keyboard_layouts: Vec<keyboard::KeyboardLayout>,
     pub current_keyboard_hkl: Option<usize>,
     pub last_real_hwnd: u64,
 
@@ -190,11 +190,11 @@ impl State {
 pub fn boot() -> (State, Task<Message>) {
     let (tray_server, tray_rx) = TrayIpcServer::start();
 
-    wireless_control::sync_all();
-    let wireless = wireless_control::get_state();
+    wireless::sync_all();
+    let wireless = wireless::get_state();
 
-    let battery = battery_control::get_battery_info();
-    let kb_layout = keyboard_control::get_active_layout();
+    let battery = battery::get_battery_info();
+    let kb_layout = keyboard::get_active_layout();
 
     let state = State {
         visible: true,
@@ -214,15 +214,15 @@ pub fn boot() -> (State, Task<Message>) {
         tray_rx: Some(tray_rx),
         _tray_server: Some(tray_server),
 
-        speaker_volume: audio_control::get_speaker_volume(),
-        mic_volume: audio_control::get_mic_volume(),
-        brightness: brightness_control::get_brightness().unwrap_or(75.0),
-        speaker_muted: audio_control::is_speaker_muted(),
-        mic_muted: audio_control::is_mic_muted(),
+        speaker_volume: audio::get_speaker_volume(),
+        mic_volume: audio::get_mic_volume(),
+        brightness: brightness::get_brightness().unwrap_or(75.0),
+        speaker_muted: audio::is_speaker_muted(),
+        mic_muted: audio::is_mic_muted(),
         output_devices: Vec::new(),
         input_devices: Vec::new(),
-        current_output_device_id: audio_control::get_current_output_device_id(),
-        current_input_device_id: audio_control::get_current_input_device_id(),
+        current_output_device_id: audio::get_current_output_device_id(),
+        current_input_device_id: audio::get_current_input_device_id(),
         media_title: String::new(),
         media_artist: String::new(),
         media_thumbnail: Vec::new(),
@@ -244,7 +244,7 @@ pub fn boot() -> (State, Task<Message>) {
         battery_plans: Vec::new(),
         keyboard_lang_text: kb_layout
             .as_ref()
-            .map(|l| keyboard_control::get_bar_text(l.hkl_raw))
+            .map(|l| keyboard::get_bar_text(l.hkl_raw))
             .unwrap_or_else(|| "EN".to_string()),
         keyboard_layouts: Vec::new(),
         current_keyboard_hkl: kb_layout.map(|l| l.hkl_raw),
@@ -278,9 +278,9 @@ pub fn boot() -> (State, Task<Message>) {
 
     let profile_task = Task::perform(
         async {
-            tokio::task::spawn_blocking(profile_control::get_profile_info)
+            tokio::task::spawn_blocking(profile::get_profile_info)
                 .await
-                .unwrap_or_else(|_| profile_control::ProfileInfo {
+                .unwrap_or_else(|_| profile::ProfileInfo {
                     display_name: "User".to_string(),
                     principal_name: String::new(),
                     avatar: None,
@@ -291,7 +291,7 @@ pub fn boot() -> (State, Task<Message>) {
 
     let update_check_task = Task::perform(
         async {
-            tokio::task::spawn_blocking(crate::updater::check_for_updates)
+            tokio::task::spawn_blocking(crate::services::updater::check_for_updates)
                 .await
                 .unwrap_or(None)
         },
@@ -378,7 +378,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
 
             // Track the real foreground window (not ours) for keyboard layout switching
-            let real_hwnd = keyboard_control::get_real_foreground_hwnd();
+            let real_hwnd = keyboard::get_real_foreground_hwnd();
             if real_hwnd != 0 {
                 state.last_real_hwnd = real_hwnd;
             }
@@ -550,7 +550,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Audio) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(audio_control::scan_audio_devices)
+                        tokio::task::spawn_blocking(audio::scan_audio_devices)
                             .await
                             .unwrap_or_default()
                     },
@@ -560,7 +560,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Battery) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(battery_control::get_power_plans)
+                        tokio::task::spawn_blocking(battery::get_power_plans)
                             .await
                             .unwrap_or_default()
                     },
@@ -570,7 +570,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if matches!(kind, PopupKind::Keyboard) {
                 tasks.push(Task::perform(
                     async {
-                        tokio::task::spawn_blocking(keyboard_control::get_all_layouts)
+                        tokio::task::spawn_blocking(keyboard::get_all_layouts)
                             .await
                             .unwrap_or_default()
                     },
@@ -595,7 +595,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SettingsSpeakerVolume(val) => {
-            audio_control::set_speaker_volume(val);
+            audio::set_speaker_volume(val);
             state.speaker_volume = val;
             if val > 0.0 {
                 state.speaker_muted = false;
@@ -603,31 +603,31 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SettingsMicVolume(val) => {
-            audio_control::set_mic_volume(val);
+            audio::set_mic_volume(val);
             state.mic_volume = val;
             Task::none()
         }
         Message::SettingsBrightness(val) => {
-            brightness_control::set_brightness(val);
+            brightness::set_brightness(val);
             state.brightness = val;
             Task::none()
         }
         Message::ToggleSpeakerMute => {
-            audio_control::toggle_speaker_mute();
-            state.speaker_muted = audio_control::is_speaker_muted();
-            state.speaker_volume = audio_control::get_speaker_volume();
+            audio::toggle_speaker_mute();
+            state.speaker_muted = audio::is_speaker_muted();
+            state.speaker_volume = audio::get_speaker_volume();
             Task::none()
         }
         Message::ToggleMicMute => {
-            audio_control::toggle_mic_mute();
-            state.mic_muted = audio_control::is_mic_muted();
-            state.mic_volume = audio_control::get_mic_volume();
+            audio::toggle_mic_mute();
+            state.mic_muted = audio::is_mic_muted();
+            state.mic_volume = audio::get_mic_volume();
             Task::none()
         }
         Message::AudioScanDevices => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio_control::scan_audio_devices)
+                    tokio::task::spawn_blocking(audio::scan_audio_devices)
                         .await
                         .unwrap_or_default()
                 },
@@ -637,14 +637,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::AudioScanResult(outputs, inputs) => {
             state.output_devices = outputs;
             state.input_devices = inputs;
-            state.current_output_device_id = audio_control::get_current_output_device_id();
-            state.current_input_device_id = audio_control::get_current_input_device_id();
+            state.current_output_device_id = audio::get_current_output_device_id();
+            state.current_input_device_id = audio::get_current_input_device_id();
             Task::none()
         }
         Message::AudioSelectDevice { device_id, is_input } => {
             Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || audio_control::set_default_device(&device_id, is_input))
+                    tokio::task::spawn_blocking(move || audio::set_default_device(&device_id, is_input))
                         .await
                         .unwrap_or(false)
                 },
@@ -653,18 +653,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AudioSelectDeviceResult(ok) => {
             if ok {
-                state.current_output_device_id = audio_control::get_current_output_device_id();
-                state.current_input_device_id = audio_control::get_current_input_device_id();
+                state.current_output_device_id = audio::get_current_output_device_id();
+                state.current_input_device_id = audio::get_current_input_device_id();
             }
             Task::none()
         }
         Message::MediaTogglePlay => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio_control::media_toggle_play_sync)
+                    tokio::task::spawn_blocking(audio::media_toggle_play_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -674,10 +674,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaNextTrack => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio_control::media_next_track_sync)
+                    tokio::task::spawn_blocking(audio::media_next_track_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -687,10 +687,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaPrevTrack => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio_control::media_prev_track_sync)
+                    tokio::task::spawn_blocking(audio::media_prev_track_sync)
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -700,7 +700,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio_control::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_media_state_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -716,19 +716,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::ToggleWifi => {
-            state.wifi_enabled = wireless_control::toggle_wifi();
+            state.wifi_enabled = wireless::toggle_wifi();
             Task::none()
         }
         Message::ToggleBluetooth => {
-            state.bluetooth_enabled = wireless_control::toggle_bluetooth();
+            state.bluetooth_enabled = wireless::toggle_bluetooth();
             Task::none()
         }
         Message::ToggleAirplane => {
-            state.airplane_enabled = wireless_control::toggle_airplane();
+            state.airplane_enabled = wireless::toggle_airplane();
             Task::none()
         }
         Message::ToggleBatterySaver => {
-            state.battery_saver_enabled = wireless_control::toggle_battery_saver();
+            state.battery_saver_enabled = wireless::toggle_battery_saver();
             Task::none()
         }
         Message::PowerAction(action) => {
@@ -771,14 +771,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SyncSettings => {
-            state.speaker_volume = audio_control::get_speaker_volume();
-            state.mic_volume = audio_control::get_mic_volume();
-            state.speaker_muted = audio_control::is_speaker_muted();
-            state.mic_muted = audio_control::is_mic_muted();
-            if let Some(b) = brightness_control::get_brightness() {
+            state.speaker_volume = audio::get_speaker_volume();
+            state.mic_volume = audio::get_mic_volume();
+            state.speaker_muted = audio::is_speaker_muted();
+            state.mic_muted = audio::is_mic_muted();
+            if let Some(b) = brightness::get_brightness() {
                 state.brightness = b;
             }
-            let wireless = wireless_control::get_state();
+            let wireless = wireless::get_state();
             state.wifi_enabled = wireless.wifi_enabled;
             state.bluetooth_enabled = wireless.bluetooth_enabled;
             state.airplane_enabled = wireless.airplane_enabled;
@@ -896,7 +896,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::BatteryTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(battery_control::get_battery_info)
+                    tokio::task::spawn_blocking(battery::get_battery_info)
                         .await
                         .unwrap_or(None)
                 },
@@ -914,7 +914,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PowerPlanList => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(battery_control::get_power_plans)
+                    tokio::task::spawn_blocking(battery::get_power_plans)
                         .await
                         .unwrap_or_default()
                 },
@@ -928,10 +928,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PowerPlanSwitch(guid) => {
             Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || battery_control::set_power_plan(&guid))
+                    tokio::task::spawn_blocking(move || battery::set_power_plan(&guid))
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(battery_control::get_power_plans)
+                    tokio::task::spawn_blocking(battery::get_power_plans)
                         .await
                         .unwrap_or_default()
                 },
@@ -941,7 +941,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::KeyboardTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(keyboard_control::get_active_layout)
+                    tokio::task::spawn_blocking(keyboard::get_active_layout)
                         .await
                         .unwrap_or(None)
                 },
@@ -951,14 +951,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::KeyboardPollResult(layout) => {
             if let Some(layout) = layout {
                 state.current_keyboard_hkl = Some(layout.hkl_raw);
-                state.keyboard_lang_text = keyboard_control::get_bar_text(layout.hkl_raw);
+                state.keyboard_lang_text = keyboard::get_bar_text(layout.hkl_raw);
             }
             Task::none()
         }
         Message::KeyboardLayoutList => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(keyboard_control::get_all_layouts)
+                    tokio::task::spawn_blocking(keyboard::get_all_layouts)
                         .await
                         .unwrap_or_default()
                 },
@@ -974,7 +974,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || {
-                        keyboard_control::switch_layout(target, hkl_raw);
+                        keyboard::switch_layout(target, hkl_raw);
                     })
                     .await
                     .ok();
@@ -1012,7 +1012,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.update_rx = Some(Arc::new(std::sync::Mutex::new(rx)));
                 let info_clone = info.clone();
                 tokio::task::spawn_blocking(move || {
-                    crate::updater::download_updates(&info_clone, tx);
+                    crate::services::updater::download_updates(&info_clone, tx);
                 });
             }
             Task::none()
@@ -1022,7 +1022,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 let info_clone = info.clone();
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || crate::updater::apply_updates(&info_clone))
+                        tokio::task::spawn_blocking(move || crate::services::updater::apply_updates(&info_clone))
                             .await
                             .unwrap_or(false)
                     },
@@ -1042,7 +1042,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::UpdateCheckAgain => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(crate::updater::check_for_updates)
+                    tokio::task::spawn_blocking(crate::services::updater::check_for_updates)
                         .await
                         .unwrap_or(None)
                 },
@@ -1073,7 +1073,7 @@ pub fn view(state: &State, window_id: WindowId) -> Element<'_, Message> {
             WindowKind::Bar => {
                 if state.initialized {
                     let tray_open = state.windows.values().any(|k| matches!(k, WindowKind::Popup { kind: PopupKind::Tray }));
-                    iced::widget::mouse_area(bar_ui::bar(
+                    iced::widget::mouse_area(bar::bar(
                         &state.clock_text,
                         state.is_online,
                         tray_open,
@@ -1093,7 +1093,7 @@ pub fn view(state: &State, window_id: WindowId) -> Element<'_, Message> {
                 }
             }
             WindowKind::Popup { kind } => {
-                iced::widget::mouse_area(crate::popup::popup_view(
+                iced::widget::mouse_area(crate::ui::popup::popup_view(
                     *kind,
                     &state.tray_manager,
                     state,
