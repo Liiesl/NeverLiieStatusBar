@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, stack, text, Space};
+use iced::widget::{button, column, container, row, stack, text, Space};
 use iced::{Color, Element, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -219,5 +219,5 @@ pub(crate) fn battery_popup_content(state: &crate::app::State) -> Element<'stati
     ]
     .spacing(10);
 
-    scrollable(content.padding(4)).into()
+    content.into()
 }

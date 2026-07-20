@@ -2,6 +2,7 @@
 
 mod app;
 mod config;
+mod measure;
 mod platform;
 mod services;
 mod ui;

@@ -1,4 +1,4 @@
-use iced::widget::{column, row, scrollable, Space};
+use iced::widget::{column, row, Space};
 use iced::{Element, Length};
 
 use crate::app::{Message, PowerAction};
@@ -140,5 +140,5 @@ pub(crate) fn settings_popup_content(state: &crate::app::State) -> Element<'stat
     let power_section = column![power_label, power_row].spacing(6);
 
     let content = column![grid, sliders, power_section].spacing(16);
-    scrollable(content).into()
+    content.into()
 }

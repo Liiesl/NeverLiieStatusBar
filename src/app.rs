@@ -110,6 +110,8 @@ pub enum Message {
     UpdateDownloadStart,
     UpdateApply,
     UpdateDismiss,
+    PopupResizeToContent(WindowId),
+    PopupResizeApply(WindowId, f32),
 }
 
 #[derive(Debug)]
@@ -547,13 +549,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let target_y = config::bar_height();
 
             let popup_settings = window::Settings {
-                size: Size::new(config::popup_width(), config::popup_min_height()),
+                size: Size::new(config::popup_width(), 2000.0),
                 position: window::Position::Specific(Point::new(target_x, target_y)),
                 decorations: false,
                 transparent: true,
                 level: window::Level::AlwaysOnTop,
                 resizable: false,
-                visible: true,
+                visible: false,
                 exit_on_close_request: false,
                 ..Default::default()
             };
@@ -639,7 +641,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::PopupHwndReady(id, raw_hwnd) => {
             win32::apply_popup_flags(raw_hwnd);
-            let _ = id;
+
+            if let Some(WindowKind::Popup { kind }) = state.windows.get(&id) {
+                if matches!(kind, PopupKind::Tray | PopupKind::Network) {
+                    return Task::batch([
+                        window::resize(
+                            id,
+                            Size::new(config::popup_width(), config::popup_min_height()),
+                        ),
+                        window::set_mode(id, window::Mode::Windowed),
+                    ]);
+                }
+                return Task::perform(
+                    async move { id },
+                    Message::PopupResizeToContent,
+                );
+            }
             Task::none()
         }
         Message::SettingsPageSelected(page) => {
@@ -1124,6 +1141,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 },
                 |info| Message::UpdateCheckResult(Box::new(info)),
             )
+        }
+        Message::PopupResizeToContent(id) => {
+            let op = crate::measure::MeasurePopupContent::new(
+                crate::ui::popup::popup_content_id(),
+            );
+            return iced::advanced::widget::operate(op)
+                .map(move |height| Message::PopupResizeApply(id, height));
+        }
+        Message::PopupResizeApply(id, height) => {
+            return Task::batch([
+                window::resize(id, Size::new(config::popup_width(), height)),
+                window::set_mode(id, window::Mode::Windowed),
+            ]);
         }
     }
 }

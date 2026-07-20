@@ -9,11 +9,16 @@ pub(crate) mod widgets;
 mod update;
 
 use iced::widget::{column, container, rule, text};
+use iced::widget::Id;
 use iced::{Color, Element, Length, Padding, Theme};
 
 use crate::app::Message;
 use crate::config;
 use crate::platform::systray::SystemTrayManager;
+
+pub fn popup_content_id() -> Id {
+    Id::new("popup-content")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PopupKind {
@@ -81,13 +86,20 @@ pub fn popup_view(
         PopupKind::Update => update::update_popup_content(state),
     };
 
+    let height = if matches!(kind, PopupKind::Tray | PopupKind::Network) {
+        Length::Fill
+    } else {
+        Length::Shrink
+    };
+
     let content = container(
         column![title, divider, body]
             .spacing(12)
             .padding(Padding::from([16.0, 16.0])),
     )
+    .id(popup_content_id())
     .width(config::popup_width())
-    .height(Length::Fill)
+    .height(height)
     .style(widgets::popup_inner_style);
 
     content.into()

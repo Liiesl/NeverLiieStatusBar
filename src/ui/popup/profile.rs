@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::widget::{column, container, row, text, Space};
 use iced::{Color, Element, Length, Padding, Theme};
 
 use crate::app::{Message, PowerAction};
@@ -118,5 +118,5 @@ pub(crate) fn profile_popup_content(state: &crate::app::State) -> Element<'stati
     .spacing(15)
     .width(Length::Fill);
 
-    scrollable(content.padding(4)).into()
+    content.into()
 }

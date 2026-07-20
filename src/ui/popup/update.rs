@@ -1,4 +1,4 @@
-use iced::widget::{column, row, scrollable, text};
+use iced::widget::{column, row, text};
 use iced::{Color, Element, Length, Theme};
 
 use crate::app::Message;
@@ -50,7 +50,7 @@ pub(crate) fn update_popup_content(state: &crate::app::State) -> Element<'static
             .spacing(10)
             .width(Length::Fill);
 
-        return scrollable(body).into();
+        return body.into();
     }
 
     if state.update_downloading {
@@ -114,7 +114,7 @@ pub(crate) fn update_popup_content(state: &crate::app::State) -> Element<'static
             .spacing(10)
             .width(Length::Fill);
 
-        return scrollable(body).into();
+        return body.into();
     }
 
     if let Some(ref info) = state.update_info {
@@ -170,7 +170,7 @@ pub(crate) fn update_popup_content(state: &crate::app::State) -> Element<'static
 
         let body = sections.push(divider()).push(download_btn).push(dismiss_btn);
 
-        scrollable(body).into()
+        body.into()
     } else {
         let check_icon = text(lucide_icons::Icon::CheckCircle.to_string())
             .size(24)
@@ -199,6 +199,6 @@ pub(crate) fn update_popup_content(state: &crate::app::State) -> Element<'static
             .spacing(10)
             .width(Length::Fill);
 
-        scrollable(body).into()
+        body.into()
     }
 }

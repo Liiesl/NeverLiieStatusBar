@@ -1,4 +1,4 @@
-use iced::widget::{button, column, row, scrollable, text};
+use iced::widget::{button, column, row, text};
 use iced::{Color, Element, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -74,5 +74,5 @@ pub(crate) fn keyboard_popup_content(state: &crate::app::State) -> Element<'stat
         layout_list = layout_list.push(layout_btn);
     }
 
-    scrollable(layout_list.padding(4)).into()
+    layout_list.padding(4).into()
 }

@@ -1,4 +1,4 @@
-use iced::widget::{column, scrollable, text};
+use iced::widget::{column, text};
 use iced::Element;
 
 use crate::app::Message;
@@ -92,5 +92,5 @@ pub(crate) fn audio_popup_content(state: &crate::app::State) -> Element<'static,
         content = content.push(divider()).push(media_section);
     }
 
-    scrollable(content.padding(4)).into()
+    content.into()
 }
