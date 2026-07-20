@@ -18,14 +18,15 @@ A lightweight, auto-hiding status bar for Windows built in Rust. Companion modul
 - **System tray** — intercepts Explorer tray icons via a native hook DLL
 - **Quick Settings** — combined panel for toggles, sliders, and power actions
 
-## Requirements
+## Installation
 
-- Windows 10/11
-- Rust (edition 2024)
-- Git
-- [.NET SDK 8+](https://dotnet.microsoft.com/download) (for `vpk` packaging tool)
+Download the latest installer or portable zip from the [Releases](https://github.com/Liiesl/NeverLiieStatusBar/releases) page.
 
-## Build
+The app auto-updates — when a new version is released, an update indicator appears in the bar.
+
+## Building from Source
+
+Requires Windows 10/11, Rust (edition 2024), and Git.
 
 Clone with submodules:
 
@@ -48,50 +49,11 @@ cargo build -p nl-tray-hook --release
 
 Place `nl_tray_hook.dll` next to the main executable.
 
-## Packaging & Release
-
-Install the Velopack CLI tool:
-
-```bash
-dotnet tool install -g vpk
-```
-
-Package a release (stages only the exe + DLL, runs vpk):
-
-```bash
-package.bat
-```
-
-Or manually:
-
-```bash
-mkdir staging
-copy target\release\neverliie-statusbar.exe staging\
-copy target\release\nl_tray_hook.dll staging\
-vpk pack -u NeverLiieStatusBar -v 0.1.0 -p ./staging -e neverliie-statusbar.exe
-```
-
-Output in `Releases/`:
-- `NeverLiieStatusBar-win-Setup.exe` — standalone installer
-- `NeverLiieStatusBar-0.1.0-full.nupkg` — update package
-- `RELEASES` — updater manifest
-
-To publish, upload the files from `Releases/` to a GitHub Release tagged `v<version>`.
-
-### Automated Releases
-
-Pushing a `v*` tag triggers the GitHub Actions workflow which builds, packages, and creates a release automatically:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
 ## Runtime
 
 - The tray hook DLL must be accessible from Explorer's process for tray icons to work.
 - In release mode the app runs as a Windows GUI application (no console window).
-- On startup, the app checks GitHub Releases for updates. If an update is available, an arrow icon appears next to the profile in the bar. Clicking it opens the update popup where you can download and restart.
+- On startup, the app checks GitHub Releases for updates. If an update is available, an "Update available" indicator appears in the bar. Clicking it opens the update popup where you can download and restart.
 
 ## Project Structure
 
@@ -100,27 +62,36 @@ NeverLiieStatusBar/
 ├── src/                    # Main application
 │   ├── main.rs             # Entry point (iced daemon + VelopackApp init)
 │   ├── app.rs              # State, messages, update loop
-│   ├── updater.rs          # Velopack update check/download/apply
-│   ├── bar_ui.rs           # Bar layout
-│   ├── popup.rs            # Popup panel UIs (including update popup)
 │   ├── config.rs           # Dimensions, colors, timing
-│   ├── audio_control.rs    # Audio volume/mute/device
-│   ├── battery_control.rs  # Battery and power plans
-│   ├── brightness_control.rs
-│   ├── wireless_control.rs
-│   ├── keyboard_control.rs
-│   ├── network.rs          # Wi-Fi management
-│   ├── profile_control.rs  # User profile + avatar
-│   ├── ipc.rs              # Named pipe IPC server
-│   ├── systray.rs          # Tray icon manager
-│   └── icon_utils.rs       # HICON conversion (SSE2)
+│   ├── services/           # Background services
+│   │   ├── updater.rs      # Velopack update check/download/apply
+│   │   ├── audio.rs        # Audio volume/mute/device
+│   │   ├── battery.rs      # Battery and power plans
+│   │   ├── brightness.rs   # Screen brightness
+│   │   ├── keyboard.rs     # Layout indicator/switcher
+│   │   ├── network.rs      # Wi-Fi management
+│   │   ├── profile.rs      # User profile + avatar
+│   │   └── wireless.rs     # Wi-Fi/Bluetooth/Airplane toggles
+│   ├── platform/           # OS-level integrations
+│   │   ├── win32.rs        # Window flags, DWM, z-order
+│   │   ├── ipc.rs          # Named pipe IPC server
+│   │   ├── systray.rs      # Tray icon manager
+│   │   └── icon_utils.rs   # HICON conversion
+│   └── ui/                 # UI layer
+│       ├── bar.rs          # Status bar layout
+│       └── popup/          # Popup panels
+│           ├── update.rs   # Update popup
+│           ├── audio.rs
+│           ├── battery.rs
+│           ├── keyboard.rs
+│           ├── network.rs
+│           ├── profile.rs
+│           ├── settings.rs
+│           └── tray.rs
 ├── tray-hook/              # System tray hook DLL (cdylib)
-│   └── src/lib.rs
 ├── iced/                   # Vendored iced GUI framework (git submodule)
 ├── .github/workflows/
-│   ├── release.yml         # Build + vpk package on tag push
-│   └── notify-parent.yml   # Submodule update notification
-├── package.bat             # Local packaging script
+│   └── release.yml         # Build + package + publish on tag push
 └── Cargo.toml              # Workspace manifest
 ```
 
