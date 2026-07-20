@@ -1,13 +1,43 @@
 use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
 use windows::Win32::System::Power::{
     GetSystemPowerStatus, PowerEnumerate, PowerGetActiveScheme, PowerReadFriendlyName,
-    PowerSetActiveScheme, ACCESS_ACTIVE_OVERLAY_SCHEME, ACCESS_OVERLAY_SCHEME, ACCESS_SCHEME,
-    POWER_DATA_ACCESSOR, SYSTEM_POWER_STATUS,
+    PowerSetActiveScheme, ACCESS_SCHEME, SYSTEM_POWER_STATUS,
 };
 use windows::Win32::System::WindowsProgramming::{
     AC_LINE_ONLINE, BATTERY_LIFE_UNKNOWN, BATTERY_PERCENTAGE_UNKNOWN,
 };
 use windows_core::GUID;
+
+windows_core::link!(
+    "powrprof.dll" "system" fn PowerGetEffectiveOverlayScheme(
+        powermodeguid: *mut GUID
+    ) -> windows::Win32::Foundation::WIN32_ERROR
+);
+
+windows_core::link!(
+    "powrprof.dll" "system" fn PowerSetActiveOverlayScheme(
+        powermodeguid: *const GUID
+    ) -> windows::Win32::Foundation::WIN32_ERROR
+);
+
+const GUID_POWER_MODE_NONE: GUID = GUID {
+    data1: 0x00000000,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+};
+const GUID_POWER_MODE_BEST_EFFICIENCY: GUID = GUID {
+    data1: 0x961cc777,
+    data2: 0x2547,
+    data3: 0x4f9d,
+    data4: [0x81, 0x74, 0x7d, 0x86, 0x18, 0x1b, 0x8a, 0x7a],
+};
+const GUID_POWER_MODE_BEST_PERFORMANCE: GUID = GUID {
+    data1: 0xded574b5,
+    data2: 0x45a0,
+    data3: 0x4f42,
+    data4: [0x87, 0x37, 0x46, 0x34, 0x5c, 0x09, 0xc2, 0x38],
+};
 
 #[derive(Debug, Clone)]
 pub struct BatteryInfo {
@@ -61,29 +91,45 @@ unsafe fn read_scheme_name(guid: GUID) -> String {
     }
 }
 
-unsafe fn enumerate_scheme_guids(access: POWER_DATA_ACCESSOR) -> Vec<GUID> {
+fn is_overlay_guid(guid: &GUID) -> bool {
+    matches!(
+        *guid,
+        GUID_POWER_MODE_NONE | GUID_POWER_MODE_BEST_EFFICIENCY | GUID_POWER_MODE_BEST_PERFORMANCE
+    )
+}
+
+fn overlay_guid_name(guid: &GUID) -> &'static str {
+    if *guid == GUID_POWER_MODE_BEST_EFFICIENCY {
+        "Best Power Efficiency"
+    } else if *guid == GUID_POWER_MODE_BEST_PERFORMANCE {
+        "Best Performance"
+    } else {
+        "Balanced"
+    }
+}
+
+unsafe fn get_active_overlay() -> Option<GUID> {
+    let mut guid = GUID::default();
+    if unsafe { PowerGetEffectiveOverlayScheme(&mut guid) } == ERROR_SUCCESS {
+        Some(guid)
+    } else {
+        None
+    }
+}
+
+unsafe fn enumerate_scheme_guids() -> Vec<GUID> {
     let mut guids = Vec::new();
     let mut index = 0u32;
     loop {
         let mut guid_buf = [0u8; 16];
         let mut buf_size = 16u32;
-        if unsafe { PowerEnumerate(None, None, None, access, index, Some(guid_buf.as_mut_ptr()), &mut buf_size) } != ERROR_SUCCESS {
+        if unsafe { PowerEnumerate(None, None, None, ACCESS_SCHEME, index, Some(guid_buf.as_mut_ptr()), &mut buf_size) } != ERROR_SUCCESS {
             break;
         }
         guids.push(unsafe { std::mem::transmute(guid_buf) });
         index += 1;
     }
     guids
-}
-
-unsafe fn get_active_overlay_guid() -> Option<GUID> {
-    let mut guid_buf = [0u8; 16];
-    let mut buf_size = 16u32;
-    if unsafe { PowerEnumerate(None, None, None, ACCESS_ACTIVE_OVERLAY_SCHEME, 0, Some(guid_buf.as_mut_ptr()), &mut buf_size) } == ERROR_SUCCESS {
-        Some(unsafe { std::mem::transmute(guid_buf) })
-    } else {
-        None
-    }
 }
 
 pub fn get_battery_info() -> Option<BatteryInfo> {
@@ -117,14 +163,18 @@ pub fn get_battery_info() -> Option<BatteryInfo> {
 
 pub fn get_power_plans() -> Vec<PowerPlan> {
     unsafe {
-        let overlay_guids = enumerate_scheme_guids(ACCESS_OVERLAY_SCHEME);
-        if !overlay_guids.is_empty() {
-            let active_overlay = get_active_overlay_guid();
+        let overlay_guids = [
+            GUID_POWER_MODE_BEST_PERFORMANCE,
+            GUID_POWER_MODE_NONE,
+            GUID_POWER_MODE_BEST_EFFICIENCY,
+        ];
+
+        if let Some(active_overlay) = get_active_overlay() {
             return overlay_guids
-                .into_iter()
-                .map(|guid| {
-                    let name = read_scheme_name(guid);
-                    let is_active = active_overlay.as_ref() == Some(&guid);
+                .iter()
+                .map(|&guid| {
+                    let name = overlay_guid_name(&guid).to_string();
+                    let is_active = active_overlay == guid;
                     PowerPlan {
                         name,
                         guid: guid_to_string(&guid),
@@ -145,7 +195,7 @@ pub fn get_power_plans() -> Vec<PowerPlan> {
             }
         };
 
-        enumerate_scheme_guids(ACCESS_SCHEME)
+        enumerate_scheme_guids()
             .into_iter()
             .enumerate()
             .map(|(i, guid)| {
@@ -164,7 +214,11 @@ pub fn get_power_plans() -> Vec<PowerPlan> {
 pub fn set_power_plan(guid: &str) {
     unsafe {
         if let Ok(scheme_guid) = GUID::try_from(guid) {
-            let _ = PowerSetActiveScheme(None, Some(&scheme_guid));
+            if is_overlay_guid(&scheme_guid) {
+                let _ = PowerSetActiveOverlayScheme(&scheme_guid);
+            } else {
+                let _ = PowerSetActiveScheme(None, Some(&scheme_guid));
+            }
         }
     }
 }
