@@ -99,7 +99,13 @@ pub(crate) fn profile_popup_content(state: &crate::app::State) -> Element<'stati
         Message::PowerAction(PowerAction::OpenSettings),
     );
 
-    let buttons = column![open_settings_btn, system_settings_btn]
+    let statusbar_settings_btn = action_button(
+        lucide_icons::Icon::Settings,
+        "  StatusBar Settings",
+        Message::OpenSettingsWindow,
+    );
+
+    let buttons = column![open_settings_btn, system_settings_btn, statusbar_settings_btn]
         .spacing(5)
         .width(Length::Fill);
 

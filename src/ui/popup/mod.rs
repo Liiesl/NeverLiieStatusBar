@@ -50,20 +50,20 @@ pub fn popup_view(
     let title = text(kind.title())
         .size(14)
         .color(Color::from_rgba(
-            config::TEXT_COLOR[0],
-            config::TEXT_COLOR[1],
-            config::TEXT_COLOR[2],
-            config::TEXT_COLOR[3],
+            config::text_color()[0],
+            config::text_color()[1],
+            config::text_color()[2],
+            config::text_color()[3],
         ))
         .center()
         .width(Length::Fill);
 
     let divider = rule::horizontal(1).style(|_theme: &Theme| rule::Style {
         color: Color::from_rgba(
-            config::BORDER_COLOR[0],
-            config::BORDER_COLOR[1],
-            config::BORDER_COLOR[2],
-            config::BORDER_COLOR[3],
+            config::border_color()[0],
+            config::border_color()[1],
+            config::border_color()[2],
+            config::border_color()[3],
         ),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
@@ -86,7 +86,7 @@ pub fn popup_view(
             .spacing(12)
             .padding(Padding::from([16.0, 16.0])),
     )
-    .width(config::POPUP_WIDTH)
+    .width(config::popup_width())
     .height(Length::Fill)
     .style(widgets::popup_inner_style);
 

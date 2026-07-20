@@ -73,33 +73,33 @@ pub fn bar(
 
     let bar_content = container(bar_row)
         .width(Length::Fill)
-        .height(config::BAR_HEIGHT)
-        .padding(Padding::from([0, config::FLOATING_MARGIN_X as u16]))
+        .height(config::bar_height())
+        .padding(Padding::from([0, config::floating_margin_x() as u16]))
         .style(bar_container_style);
 
     let clock = text(clock_text.to_owned())
         .size(14)
         .color(Color::from_rgba(
-            config::TEXT_COLOR[0],
-            config::TEXT_COLOR[1],
-            config::TEXT_COLOR[2],
-            config::TEXT_COLOR[3],
+            config::text_color()[0],
+            config::text_color()[1],
+            config::text_color()[2],
+            config::text_color()[3],
         ))
         .center();
 
     let clock_container = container(clock)
         .width(300)
-        .height(config::BAR_HEIGHT)
+        .height(config::bar_height())
         .center_x(300)
-        .center_y(config::BAR_HEIGHT);
+        .center_y(config::bar_height());
 
     stack![bar_content]
         .push(
             container(clock_container)
                 .width(Length::Fill)
-                .height(config::BAR_HEIGHT)
+                .height(config::bar_height())
                 .center_x(Length::Fill)
-                .center_y(config::BAR_HEIGHT),
+                .center_y(config::bar_height()),
         )
         .into()
 }
@@ -107,17 +107,17 @@ pub fn bar(
 fn bar_container_style(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(Color::from_rgba(
-            config::BG_COLOR[0],
-            config::BG_COLOR[1],
-            config::BG_COLOR[2],
-            config::BG_COLOR[3],
+            config::bg_color()[0],
+            config::bg_color()[1],
+            config::bg_color()[2],
+            config::bg_color()[3],
         ))),
         border: iced::Border {
             color: Color::from_rgba(
-                config::BORDER_COLOR[0],
-                config::BORDER_COLOR[1],
-                config::BORDER_COLOR[2],
-                config::BORDER_COLOR[3],
+                config::border_color()[0],
+                config::border_color()[1],
+                config::border_color()[2],
+                config::border_color()[3],
             ),
             width: 1.0,
             radius: 0.0.into(),
@@ -136,20 +136,20 @@ fn clickable_widget(
         .size(14)
         .font(iced::Font::with_name("lucide"))
         .color(Color::from_rgba(
-            config::TEXT_COLOR[0],
-            config::TEXT_COLOR[1],
-            config::TEXT_COLOR[2],
-            config::TEXT_COLOR[3],
+            config::text_color()[0],
+            config::text_color()[1],
+            config::text_color()[2],
+            config::text_color()[3],
         ));
 
     let content: Element<'static, Message> = if let Some(label) = label {
         let label_text = text(label)
             .size(13)
             .color(Color::from_rgba(
-                config::TEXT_COLOR[0],
-                config::TEXT_COLOR[1],
-                config::TEXT_COLOR[2],
-                config::TEXT_COLOR[3],
+                config::text_color()[0],
+                config::text_color()[1],
+                config::text_color()[2],
+                config::text_color()[3],
             ));
         row![icon_text, label_text]
             .spacing(4)
@@ -165,14 +165,14 @@ fn clickable_widget(
 
     button(content)
         .padding(Padding::from([0, 8]))
-        .height(config::BAR_HEIGHT)
+        .height(config::bar_height())
         .style(|_theme: &Theme, status: button::Status| match status {
             button::Status::Hovered => button::Style {
                 background: Some(iced::Background::Color(Color::from_rgba(
-                    config::HOVER_BG[0],
-                    config::HOVER_BG[1],
-                    config::HOVER_BG[2],
-                    config::HOVER_BG[3],
+                    config::hover_bg()[0],
+                    config::hover_bg()[1],
+                    config::hover_bg()[2],
+                    config::hover_bg()[3],
                 ))),
                 border: iced::Border {
                     radius: 4.0.into(),
@@ -205,20 +205,20 @@ fn clickable_widget_str(
         .size(14)
         .font(iced::Font::with_name("lucide"))
         .color(Color::from_rgba(
-            config::TEXT_COLOR[0],
-            config::TEXT_COLOR[1],
-            config::TEXT_COLOR[2],
-            config::TEXT_COLOR[3],
+            config::text_color()[0],
+            config::text_color()[1],
+            config::text_color()[2],
+            config::text_color()[3],
         ));
 
     let content: Element<'static, Message> = if let Some(label) = label {
         let label_text = text(label.to_owned())
             .size(13)
             .color(Color::from_rgba(
-                config::TEXT_COLOR[0],
-                config::TEXT_COLOR[1],
-                config::TEXT_COLOR[2],
-                config::TEXT_COLOR[3],
+                config::text_color()[0],
+                config::text_color()[1],
+                config::text_color()[2],
+                config::text_color()[3],
             ));
         row![icon_text, label_text]
             .spacing(4)
@@ -234,14 +234,14 @@ fn clickable_widget_str(
 
     button(content)
         .padding(Padding::from([0, 8]))
-        .height(config::BAR_HEIGHT)
+        .height(config::bar_height())
         .style(|_theme: &Theme, status: button::Status| match status {
             button::Status::Hovered => button::Style {
                 background: Some(iced::Background::Color(Color::from_rgba(
-                    config::HOVER_BG[0],
-                    config::HOVER_BG[1],
-                    config::HOVER_BG[2],
-                    config::HOVER_BG[3],
+                    config::hover_bg()[0],
+                    config::hover_bg()[1],
+                    config::hover_bg()[2],
+                    config::hover_bg()[3],
                 ))),
                 border: iced::Border {
                     radius: 4.0.into(),
@@ -295,14 +295,14 @@ fn clickable_widget_accent(
 
     button(content)
         .padding(Padding::from([0, 8]))
-        .height(config::BAR_HEIGHT)
+        .height(config::bar_height())
         .style(|_theme: &Theme, status: button::Status| match status {
             button::Status::Hovered => button::Style {
                 background: Some(iced::Background::Color(Color::from_rgba(
-                    config::HOVER_BG[0],
-                    config::HOVER_BG[1],
-                    config::HOVER_BG[2],
-                    config::HOVER_BG[3],
+                    config::hover_bg()[0],
+                    config::hover_bg()[1],
+                    config::hover_bg()[2],
+                    config::hover_bg()[3],
                 ))),
                 border: iced::Border {
                     radius: 4.0.into(),

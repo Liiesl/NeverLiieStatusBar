@@ -29,6 +29,13 @@ pub enum PowerAction {
     OpenSettings,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsPage {
+    General,
+    Appearance,
+    About,
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum Message {
@@ -40,9 +47,16 @@ pub enum Message {
     WindowClosed(WindowId),
     ClockTick(String),
     OpenPopup { kind: PopupKind },
+    OpenSettingsWindow,
     ClosePopup,
     PopupWindowOpened(WindowId),
     PopupHwndReady(WindowId, u64),
+    SettingsPageSelected(SettingsPage),
+    SettingsSetAutoHideDelay(f32),
+    SettingsSetTriggerDwell(f32),
+    SettingsSetAnimDuration(f32),
+    SettingsSetMouseTriggerHeight(f32),
+    SettingsOpenConfigFolder,
     BarMouseEnter,
     BarMouseExit,
     PopupMouseEnter,
@@ -102,6 +116,7 @@ pub enum Message {
 pub enum WindowKind {
     Bar,
     Popup { kind: PopupKind },
+    Settings,
 }
 
 #[derive(Debug)]
@@ -157,6 +172,8 @@ pub struct State {
     pub current_keyboard_hkl: Option<usize>,
     pub last_real_hwnd: u64,
 
+    pub settings_page: SettingsPage,
+
     pub profile_display_name: String,
     pub profile_principal_name: String,
     pub profile_avatar_handle: Option<iced::widget::image::Handle>,
@@ -178,7 +195,7 @@ pub struct SlideAnim {
 
 impl State {
     fn is_at_top_edge(&self) -> bool {
-        self.cursor_pos.y >= 0.0 && self.cursor_pos.y < config::MOUSE_TRIGGER_HEIGHT
+        self.cursor_pos.y >= 0.0 && self.cursor_pos.y < config::mouse_trigger_height()
     }
 
     fn ease_out_cubic(t: f32) -> f32 {
@@ -195,6 +212,7 @@ pub fn boot() -> (State, Task<Message>) {
 
     let battery = battery::get_battery_info();
     let kb_layout = keyboard::get_active_layout();
+    config::init_settings();
 
     let state = State {
         visible: true,
@@ -250,6 +268,8 @@ pub fn boot() -> (State, Task<Message>) {
         current_keyboard_hkl: kb_layout.map(|l| l.hkl_raw),
         last_real_hwnd: 0,
 
+        settings_page: SettingsPage::General,
+
         profile_display_name: "Loading...".to_string(),
         profile_principal_name: String::new(),
         profile_avatar_handle: None,
@@ -263,7 +283,7 @@ pub fn boot() -> (State, Task<Message>) {
     };
 
     let window_settings = window::Settings {
-        size: Size::new(800.0, config::BAR_HEIGHT),
+        size: Size::new(800.0, config::bar_height()),
         position: window::Position::Specific(Point::new(0.0, 0.0)),
         decorations: false,
         transparent: true,
@@ -321,6 +341,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.bar_hwnd = raw_hwnd;
                 win32::apply_window_flags(raw_hwnd);
                 win32::apply_dwm_rounded_corners(raw_hwnd);
+            } else if let Some(WindowKind::Settings) = state.windows.get(&id) {
+                win32::apply_dwm_rounded_corners(raw_hwnd);
             } else {
                 win32::apply_popup_flags(raw_hwnd);
                 win32::apply_dwm_rounded_corners(raw_hwnd);
@@ -331,10 +353,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.screen_width = monitor_size.width;
             state.initialized = true;
 
-            Task::batch([
-                window::resize(id, Size::new(monitor_size.width, config::BAR_HEIGHT)),
-                window::move_to(id, Point::new(0.0, 0.0)),
-            ])
+            if matches!(state.windows.get(&id), Some(WindowKind::Bar)) {
+                Task::batch([
+                    window::resize(id, Size::new(monitor_size.width, config::bar_height())),
+                    window::move_to(id, Point::new(0.0, 0.0)),
+                ])
+            } else {
+                Task::none()
+            }
         }
         Message::WindowClosed(id) => {
             state.windows.remove(&id);
@@ -402,7 +428,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         state.edge_dwell_start = Some(Instant::now());
                     }
                     match state.edge_dwell_start {
-                        Some(start) => start.elapsed() >= config::TRIGGER_DWELL_TIME,
+                        Some(start) => start.elapsed() >= config::trigger_dwell_time(),
                         None => false,
                     }
                 }
@@ -434,7 +460,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.hide_timer_start = Some(Instant::now());
                 }
                 if let Some(start) = state.hide_timer_start
-                    && start.elapsed() >= config::AUTO_HIDE_DELAY {
+                    && start.elapsed() >= config::auto_hide_delay() {
                         state.hide_timer_start = None;
                         if state.visible && state.slide.is_none() {
                             state.visible = false;
@@ -442,7 +468,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             state.slide = Some(SlideAnim {
                                 start_time: Instant::now(),
                                 from_y,
-                                to_y: -config::BAR_HEIGHT,
+                                to_y: -config::bar_height(),
                             });
                         }
                         return close_all_popups(state);
@@ -473,7 +499,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::Frame(now) => {
             if let Some(slide) = &state.slide {
                 let elapsed = now.duration_since(slide.start_time);
-                let total = config::ANIM_DURATION;
+                let total = config::anim_duration();
                 let t = if total.as_millis() == 0 {
                     1.0
                 } else {
@@ -507,21 +533,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
             let is_left = matches!(kind, PopupKind::Profile | PopupKind::Update);
             let target_x = if is_left {
-                let comp_center = config::FLOATING_MARGIN_X + 20.0 + 40.0;
-                (comp_center - config::POPUP_WIDTH / 2.0).max(10.0)
+                let comp_center = config::floating_margin_x() + 20.0 + 40.0;
+                (comp_center - config::popup_width() / 2.0).max(10.0)
             } else {
-                let comp_center = state.screen_width - config::FLOATING_MARGIN_X - 20.0 - 80.0;
-                let x = comp_center - config::POPUP_WIDTH / 2.0;
-                if x + config::POPUP_WIDTH > state.screen_width - 10.0 {
-                    state.screen_width - config::POPUP_WIDTH - 10.0
+                let comp_center = state.screen_width - config::floating_margin_x() - 20.0 - 80.0;
+                let x = comp_center - config::popup_width() / 2.0;
+                if x + config::popup_width() > state.screen_width - 10.0 {
+                    state.screen_width - config::popup_width() - 10.0
                 } else {
                     x.max(10.0)
                 }
             };
-            let target_y = config::BAR_HEIGHT;
+            let target_y = config::bar_height();
 
             let popup_settings = window::Settings {
-                size: Size::new(config::POPUP_WIDTH, config::POPUP_MIN_HEIGHT),
+                size: Size::new(config::popup_width(), config::popup_min_height()),
                 position: window::Position::Specific(Point::new(target_x, target_y)),
                 decorations: false,
                 transparent: true,
@@ -579,6 +605,32 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::batch(tasks)
         }
+        Message::OpenSettingsWindow => {
+            let already_open = state.windows.values().any(|k| matches!(k, WindowKind::Settings));
+            if already_open {
+                return Task::none();
+            }
+
+            let settings_window = window::Settings {
+                size: Size::new(600.0, 500.0),
+                position: window::Position::Centered,
+                decorations: true,
+                transparent: false,
+                level: window::Level::AlwaysOnTop,
+                resizable: true,
+                visible: true,
+                exit_on_close_request: true,
+                ..Default::default()
+            };
+
+            let (id, open_task) = window::open(settings_window);
+            state.windows.insert(id, WindowKind::Settings);
+
+            Task::batch([
+                open_task.map(Message::WindowOpened),
+                window::gain_focus(id),
+            ])
+        }
         Message::ClosePopup => {
             close_all_popups(state)
         }
@@ -588,6 +640,30 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PopupHwndReady(id, raw_hwnd) => {
             win32::apply_popup_flags(raw_hwnd);
             let _ = id;
+            Task::none()
+        }
+        Message::SettingsPageSelected(page) => {
+            state.settings_page = page;
+            Task::none()
+        }
+        Message::SettingsSetAutoHideDelay(val) => {
+            config::set_auto_hide_delay_ms(val as u64);
+            Task::none()
+        }
+        Message::SettingsSetTriggerDwell(val) => {
+            config::set_trigger_dwell_ms(val as u64);
+            Task::none()
+        }
+        Message::SettingsSetAnimDuration(val) => {
+            config::set_anim_duration_ms(val as u64);
+            Task::none()
+        }
+        Message::SettingsSetMouseTriggerHeight(val) => {
+            config::set_mouse_trigger_height(val);
+            Task::none()
+        }
+        Message::SettingsOpenConfigFolder => {
+            config::open_config_folder();
             Task::none()
         }
         Message::TrayIconClicked { id, action } => {
@@ -1102,6 +1178,9 @@ pub fn view(state: &State, window_id: WindowId) -> Element<'_, Message> {
                 .on_exit(Message::PopupMouseExit)
                 .into()
             }
+            WindowKind::Settings => {
+                crate::ui::settings::settings_view(state).into()
+            }
         }
     } else {
         Element::from(iced::widget::text(""))
@@ -1110,14 +1189,14 @@ pub fn view(state: &State, window_id: WindowId) -> Element<'_, Message> {
 
 pub fn subscription(state: &State) -> Subscription<Message> {
     let mut subs = vec![
-        time::every(config::MONITOR_INTERVAL).map(|_| Message::MonitorTick),
+        time::every(config::monitor_interval()).map(|_| Message::MonitorTick),
         time::every(Duration::from_secs(1)).map(|_| {
             let now = chrono::Local::now();
             Message::ClockTick(now.format("%a %b %d   %I:%M %p").to_string())
         }),
         window::close_events().map(Message::WindowClosed),
         time::every(Duration::from_millis(500)).map(|_| Message::SyncSettings),
-        time::every(config::AUDIO_POLL_RATE).map(|_| Message::MediaTick),
+        time::every(config::audio_poll_rate()).map(|_| Message::MediaTick),
         time::every(Duration::from_secs(5)).map(|_| Message::NetworkStatusTick),
         time::every(Duration::from_secs(30)).map(|_| Message::BatteryTick),
         time::every(Duration::from_millis(500)).map(|_| Message::KeyboardTick),

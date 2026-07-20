@@ -70,10 +70,10 @@ pub(crate) fn update_popup_content(state: &crate::app::State) -> Element<'static
             .color(sub_text_color());
 
         let progress_bg = Color::from_rgba(
-            config::BORDER_COLOR[0],
-            config::BORDER_COLOR[1],
-            config::BORDER_COLOR[2],
-            config::BORDER_COLOR[3],
+            config::border_color()[0],
+            config::border_color()[1],
+            config::border_color()[2],
+            config::border_color()[3],
         );
         let progress_fill = accent_color();
 

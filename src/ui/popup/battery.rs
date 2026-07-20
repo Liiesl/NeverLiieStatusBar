@@ -66,10 +66,10 @@ pub(crate) fn battery_popup_content(state: &crate::app::State) -> Element<'stati
         .align_y(iced::Alignment::Center);
 
     let progress_bg = Color::from_rgba(
-        config::BORDER_COLOR[0],
-        config::BORDER_COLOR[1],
-        config::BORDER_COLOR[2],
-        config::BORDER_COLOR[3],
+        config::border_color()[0],
+        config::border_color()[1],
+        config::border_color()[2],
+        config::border_color()[3],
     );
     let progress_fill = if !is_plugged && percent < 20 {
         Color::from_rgba(1.0, 0.27, 0.27, 1.0)
@@ -187,16 +187,16 @@ pub(crate) fn battery_popup_content(state: &crate::app::State) -> Element<'stati
         .style(|_theme: &Theme, status: button::Status| {
             let bg = match status {
                 button::Status::Hovered => Color::from_rgba(
-                    config::HOVER_BG[0],
-                    config::HOVER_BG[1],
-                    config::HOVER_BG[2],
-                    config::HOVER_BG[3],
+                    config::hover_bg()[0],
+                    config::hover_bg()[1],
+                    config::hover_bg()[2],
+                    config::hover_bg()[3],
                 ),
                 _ => Color::from_rgba(
-                    config::BORDER_COLOR[0],
-                    config::BORDER_COLOR[1],
-                    config::BORDER_COLOR[2],
-                    config::BORDER_COLOR[3],
+                    config::border_color()[0],
+                    config::border_color()[1],
+                    config::border_color()[2],
+                    config::border_color()[3],
                 ),
             };
             button::Style {

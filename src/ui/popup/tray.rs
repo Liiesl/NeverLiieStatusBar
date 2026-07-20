@@ -66,10 +66,10 @@ pub(crate) fn tray_popup_content(tray_manager: &SystemTrayManager) -> Element<'s
             .style(|_theme: &Theme, status: button::Status| match status {
                 button::Status::Hovered => button::Style {
                     background: Some(iced::Background::Color(Color::from_rgba(
-                        config::HOVER_BG[0],
-                        config::HOVER_BG[1],
-                        config::HOVER_BG[2],
-                        config::HOVER_BG[3],
+                        config::hover_bg()[0],
+                        config::hover_bg()[1],
+                        config::hover_bg()[2],
+                        config::hover_bg()[3],
                     ))),
                     border: iced::Border {
                         radius: 4.0.into(),

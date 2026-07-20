@@ -28,6 +28,7 @@ fn title(state: &app::State, window: iced::window::Id) -> String {
     match state.windows.get(&window) {
         Some(app::WindowKind::Bar) => "NeverLiieStatusBar".to_string(),
         Some(app::WindowKind::Popup { kind }) => kind.title().to_string(),
+        Some(app::WindowKind::Settings) => "StatusBar Settings".to_string(),
         None => String::new(),
     }
 }

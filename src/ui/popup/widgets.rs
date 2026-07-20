@@ -11,10 +11,10 @@ pub(crate) const TEXT_SUB: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
 pub(crate) fn text_color() -> Color {
     Color::from_rgba(
-        config::TEXT_COLOR[0],
-        config::TEXT_COLOR[1],
-        config::TEXT_COLOR[2],
-        config::TEXT_COLOR[3],
+        config::text_color()[0],
+        config::text_color()[1],
+        config::text_color()[2],
+        config::text_color()[3],
     )
 }
 
@@ -481,10 +481,10 @@ pub(crate) fn media_control_card(state: &crate::app::State) -> Element<'static, 
 pub(crate) fn divider() -> Element<'static, Message> {
     rule::horizontal(1).style(|_theme: &Theme| rule::Style {
         color: Color::from_rgba(
-            config::BORDER_COLOR[0],
-            config::BORDER_COLOR[1],
-            config::BORDER_COLOR[2],
-            config::BORDER_COLOR[3],
+            config::border_color()[0],
+            config::border_color()[1],
+            config::border_color()[2],
+            config::border_color()[3],
         ),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
@@ -495,17 +495,17 @@ pub(crate) fn divider() -> Element<'static, Message> {
 pub(crate) fn popup_inner_style(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(Color::from_rgba(
-            config::BG_COLOR[0],
-            config::BG_COLOR[1],
-            config::BG_COLOR[2],
-            config::BG_COLOR[3],
+            config::bg_color()[0],
+            config::bg_color()[1],
+            config::bg_color()[2],
+            config::bg_color()[3],
         ))),
         border: iced::Border {
             color: Color::from_rgba(
-                config::BORDER_COLOR[0],
-                config::BORDER_COLOR[1],
-                config::BORDER_COLOR[2],
-                config::BORDER_COLOR[3],
+                config::border_color()[0],
+                config::border_color()[1],
+                config::border_color()[2],
+                config::border_color()[3],
             ),
             width: 1.0,
             radius: 0.0.into(),
