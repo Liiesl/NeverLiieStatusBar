@@ -21,7 +21,7 @@ pub fn bar(
     let profile = clickable_widget_str(lucide_icons::Icon::User, Some(profile_name), PopupKind::Profile);
 
     let left: Element<'static, Message> = if has_update {
-        let update_widget = clickable_widget_accent(lucide_icons::Icon::ArrowUpCircle, PopupKind::Update);
+        let update_widget = clickable_widget_accent(lucide_icons::Icon::ArrowUpCircle, Some("Update available"), PopupKind::Update);
         row![profile, update_widget]
             .spacing(0)
             .align_y(iced::Alignment::Center)
@@ -266,6 +266,7 @@ fn clickable_widget_str(
 
 fn clickable_widget_accent(
     icon: lucide_icons::Icon,
+    label: Option<&str>,
     kind: PopupKind,
 ) -> Element<'static, Message> {
     let accent = Color::from_rgba(96.0 / 255.0, 205.0 / 255.0, 1.0, 1.0);
@@ -276,10 +277,21 @@ fn clickable_widget_accent(
         .font(iced::Font::with_name("lucide"))
         .color(accent);
 
-    let content: Element<'static, Message> = row![icon_text]
-        .align_y(iced::Alignment::Center)
-        .height(Fill)
-        .into();
+    let content: Element<'static, Message> = if let Some(label) = label {
+        let label_text = text(label.to_owned())
+            .size(13)
+            .color(accent);
+        row![icon_text, label_text]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .height(Fill)
+            .into()
+    } else {
+        row![icon_text]
+            .align_y(iced::Alignment::Center)
+            .height(Fill)
+            .into()
+    };
 
     button(content)
         .padding(Padding::from([0, 8]))
