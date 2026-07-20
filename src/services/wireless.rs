@@ -1,9 +1,10 @@
 use std::sync::{Mutex, OnceLock};
-use std::os::windows::process::CommandExt;
-use std::process::Command;
 use windows::Win32::NetworkManagement::WiFi::*;
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::Power::PowerSetActiveScheme;
 use windows::Devices::Radios::{Radio, RadioKind, RadioState};
+use windows::System::Power::{PowerManager, EnergySaverStatus};
+use windows_core::GUID;
 
 #[derive(Debug, Clone)]
 pub struct WirelessState {
@@ -106,31 +107,22 @@ async fn set_all_radios(new_state: RadioState) -> bool {
 }
 
 fn is_battery_saver_enabled() -> bool {
-    Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-CimInstance -Namespace root\\cimv2 -ClassName Win32_Battery).BatteryStatus",
-        ])
-        .creation_flags(0x08000000)
-        .output()
-        .map(|o| {
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            s == "2"
-        })
+    PowerManager::EnergySaverStatus()
+        .map(|s| s == EnergySaverStatus::On)
         .unwrap_or(false)
 }
 
 fn set_battery_saver_enable(enable: bool) {
-    let guid = if enable {
+    let guid_str = if enable {
         "a1841308-3541-4fab-bc81-f71556f20b4a"
     } else {
         "381b4222-f694-41f0-9685-ff5bb260df2e"
     };
-    let _ = Command::new("powercfg")
-        .args(["-setactive", guid])
-        .creation_flags(0x08000000)
-        .output();
+    if let Ok(guid) = GUID::try_from(guid_str) {
+        unsafe {
+            let _ = PowerSetActiveScheme(None, Some(&guid));
+        }
+    }
 }
 
 pub fn sync_all() {
