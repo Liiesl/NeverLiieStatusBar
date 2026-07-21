@@ -1,12 +1,13 @@
 use std::ffi::c_void;
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
+use std::time::Duration;
 
 use windows::core::{Interface, Result as WinResult, GUID, HRESULT, PCWSTR};
 use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eCapture, eCommunications, eConsole, eMultimedia, eRender, ERole,
-    IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+    IMMDeviceEnumerator, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE_ACTIVE,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize,
@@ -14,6 +15,222 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
 use windows_core::HSTRING;
+
+// ---------------------------------------------------------------------------
+// Volume change notification channel
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioEvent {
+    VolumeChanged,
+}
+
+static AUDIO_EVENT_TX: Mutex<Option<mpsc::Sender<AudioEvent>>> = Mutex::new(None);
+
+pub fn set_audio_event_sender(tx: mpsc::Sender<AudioEvent>) {
+    *AUDIO_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+}
+
+/// Create a receiver pair for audio events. Call this once at startup.
+pub fn create_audio_event_channel() -> mpsc::Receiver<AudioEvent> {
+    let (tx, rx) = mpsc::channel();
+    set_audio_event_sender(tx);
+    rx
+}
+
+/// Drain all pending audio events from the receiver. Called from MonitorTick.
+#[allow(dead_code)]
+pub fn drain_audio_events(rx: &mpsc::Receiver<AudioEvent>) -> bool {
+    let mut had_events = false;
+    while rx.try_recv().is_ok() {
+        had_events = true;
+    }
+    had_events
+}
+
+// ---------------------------------------------------------------------------
+// IAudioEndpointVolumeCallback implementation (manual vtable)
+// ---------------------------------------------------------------------------
+
+// We implement IAudioEndpointVolumeCallback manually to avoid version conflicts
+// between windows-core 0.58.0 (from iced) and 0.62.2 (from this project).
+
+#[repr(C)]
+#[allow(non_snake_case)]
+struct VolumeCallbackVtable {
+    base__: windows::core::IUnknown_Vtbl,
+    OnNotify: unsafe extern "system" fn(*mut c_void, *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> HRESULT,
+}
+
+unsafe extern "system" fn volume_callback_query_interface(
+    this: *mut c_void,
+    iid: *const GUID,
+    ppv: *mut *mut c_void,
+) -> HRESULT {
+    unsafe {
+        let target = GUID::from_u128(0x657804fa_d6ad_4496_8a60_352752af4f89);
+        let iid_unknown = GUID::from_u128(0x00000000_0000_0000_C000_000000000046);
+        if *iid == target || *iid == iid_unknown {
+            *ppv = this;
+            // vtable is *const *const (), index 1 = AddRef
+            let vtable = *(this as *const *const *const ());
+            let add_ref: unsafe extern "system" fn(*mut c_void) -> u32 =
+                std::mem::transmute(vtable.add(1).read());
+            let _ = add_ref(this);
+            HRESULT(0)
+        } else {
+            *ppv = std::ptr::null_mut();
+            HRESULT(0x80004002u32 as i32)
+        }
+    }
+}
+
+unsafe extern "system" fn volume_callback_add_ref(this: *mut c_void) -> u32 {
+    unsafe {
+        let callback = &*(this as *const VolumeCallbackInner);
+        let count = callback.ref_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        count as u32
+    }
+}
+
+unsafe extern "system" fn volume_callback_release(this: *mut c_void) -> u32 {
+    unsafe {
+        let callback = &*(this as *const VolumeCallbackInner);
+        let count = callback.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
+        if count == 0 {
+            let _ = Box::from_raw(this as *mut VolumeCallbackInner);
+        }
+        count as u32
+    }
+}
+
+unsafe extern "system" fn volume_on_notify(
+    this: *mut c_void,
+    pnotify: *mut AUDIO_VOLUME_NOTIFICATION_DATA,
+) -> HRESULT {
+    unsafe {
+        let callback = &*(this as *const VolumeCallbackInner);
+        if let Some(data) = pnotify.as_ref() {
+            let mut guard = AUDIO_STATE.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(s) = guard.as_mut() {
+                if callback.is_speaker {
+                    s.spk_volume = (data.fMasterVolume * 100.0).clamp(0.0, 100.0);
+                    s.spk_muted = data.bMuted.as_bool();
+                } else {
+                    s.mic_volume = (data.fMasterVolume * 100.0).clamp(0.0, 100.0);
+                    s.mic_muted = data.bMuted.as_bool();
+                }
+            }
+        }
+        if let Some(tx) = AUDIO_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = tx.send(AudioEvent::VolumeChanged);
+        }
+        HRESULT(0) // S_OK
+    }
+}
+
+static VOLUME_CALLBACK_VTABLE: VolumeCallbackVtable = VolumeCallbackVtable {
+    base__: windows::core::IUnknown_Vtbl {
+        QueryInterface: volume_callback_query_interface,
+        AddRef: volume_callback_add_ref,
+        Release: volume_callback_release,
+    },
+    OnNotify: volume_on_notify,
+};
+
+#[repr(C)]
+struct VolumeCallbackInner {
+    vtable: *const VolumeCallbackVtable,
+    ref_count: std::sync::atomic::AtomicI32,
+    is_speaker: bool,
+}
+
+impl VolumeCallbackInner {
+    fn new(is_speaker: bool) -> Self {
+        Self {
+            vtable: &VOLUME_CALLBACK_VTABLE,
+            ref_count: std::sync::atomic::AtomicI32::new(1),
+            is_speaker,
+        }
+    }
+}
+
+struct VolumeCallbackPtr(*mut VolumeCallbackInner);
+
+impl VolumeCallbackPtr {
+    fn new(is_speaker: bool) -> Self {
+        let inner = Box::new(VolumeCallbackInner::new(is_speaker));
+        Self(Box::into_raw(inner))
+    }
+}
+
+impl Drop for VolumeCallbackPtr {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                volume_callback_release(self.0 as *mut c_void);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audio callback registration
+// ---------------------------------------------------------------------------
+
+static VOLUME_CALLBACKS_REGISTERED: std::sync::Once = std::sync::Once::new();
+
+/// Register volume callbacks by calling the COM vtable directly.
+/// This bypasses the windows crate's Param trait to avoid the windows-core version conflict.
+unsafe fn register_volume_callback_raw(
+    volume: &IAudioEndpointVolume,
+    is_speaker: bool,
+) {
+    let cb = VolumeCallbackPtr::new(is_speaker);
+    let raw = cb.0 as *mut c_void;
+    std::mem::forget(cb); // Leak to keep alive - COM will hold reference
+
+    // Call the vtable function directly: RegisterControlChangeNotify(this, pnotify) -> HRESULT
+    // IAudioEndpointVolume vtable: IUnknown(3) + RegisterControlChangeNotify = index 3
+    let vtable = Interface::vtable(volume) as *const _ as *const *const ();
+    unsafe {
+        let fn_ptr = vtable.add(3).read();
+        let register_fn: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT =
+            std::mem::transmute(fn_ptr);
+        let _ = register_fn(Interface::as_raw(volume) as *mut c_void, raw);
+    }
+}
+
+fn register_volume_callbacks() {
+    VOLUME_CALLBACKS_REGISTERED.call_once(|| {
+        unsafe {
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let need_uninit = hr.is_ok();
+
+            // Register speaker callback
+            if let Ok(dev_enum) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+                if let Ok(device) = dev_enum.GetDefaultAudioEndpoint(eRender, eConsole) {
+                    if let Ok(volume) = device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {
+                        register_volume_callback_raw(&volume, true);
+                    }
+                }
+            }
+
+            // Register mic callback
+            if let Ok(dev_enum) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+                if let Ok(device) = dev_enum.GetDefaultAudioEndpoint(eCapture, eConsole) {
+                    if let Ok(volume) = device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {
+                        register_volume_callback_raw(&volume, false);
+                    }
+                }
+            }
+
+            if need_uninit {
+                CoUninitialize();
+            }
+        }
+    });
+}
 
 // ---------------------------------------------------------------------------
 // IPolicyConfig (undocumented COM interface for setting default audio device)
@@ -313,6 +530,10 @@ fn ensure_init() {
     }
 
     *guard = Some(state);
+
+    // Register volume change callbacks (once globally)
+    drop(guard);
+    register_volume_callbacks();
 }
 
 pub fn get_speaker_volume() -> f32 {
@@ -589,5 +810,97 @@ pub fn media_prev_track_sync() {
             && let Ok(op) = session.TrySkipPreviousAsync() {
                 let _ = op.await;
             }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// SMTC Event-Driven Updates
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaEvent {
+    /// Current media session changed or updated
+    SessionChanged,
+}
+
+static MEDIA_EVENT_TX: Mutex<Option<mpsc::Sender<MediaEvent>>> = Mutex::new(None);
+
+pub fn create_media_event_channel() -> mpsc::Receiver<MediaEvent> {
+    let (tx, rx) = mpsc::channel();
+    *MEDIA_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+    rx
+}
+
+fn send_media_event(event: MediaEvent) {
+    if let Some(tx) = MEDIA_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.send(event);
+    }
+}
+
+/// Start the SMTC event listener on a dedicated thread.
+/// Subscribes to SessionsChanged + per-session property/playback events.
+pub fn start_smtc_listener() {
+    std::thread::spawn(|| {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        rt.block_on(async {
+            loop {
+                let mgr = match get_smtc_manager().await {
+                    Some(m) => m,
+                    None => {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                // Get the current session and subscribe to its events
+                if let Ok(session) = mgr.GetCurrentSession() {
+                    // Subscribe to session events using TypedEventHandler
+                    use windows::Foundation::TypedEventHandler;
+                    let _ = session.MediaPropertiesChanged(
+                        &TypedEventHandler::new(|_, _| {
+                            send_media_event(MediaEvent::SessionChanged);
+                            Ok(())
+                        }),
+                    );
+                    let _ = session.PlaybackInfoChanged(
+                        &TypedEventHandler::new(|_, _| {
+                            send_media_event(MediaEvent::SessionChanged);
+                            Ok(())
+                        }),
+                    );
+                    let _ = session.TimelinePropertiesChanged(
+                        &TypedEventHandler::new(|_, _| {
+                            send_media_event(MediaEvent::SessionChanged);
+                            Ok(())
+                        }),
+                    );
+                }
+
+                // Subscribe to SessionsChanged to detect new/removed sessions
+                use windows::Foundation::TypedEventHandler;
+                let _ = mgr.SessionsChanged(
+                    &TypedEventHandler::new(|_, _| {
+                        send_media_event(MediaEvent::SessionChanged);
+                        Ok(())
+                    }),
+                );
+
+                // Keep the listener alive - re-check periodically for session changes
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    if mgr.GetCurrentSession().is_err() {
+                        send_media_event(MediaEvent::SessionChanged);
+                        break;
+                    }
+                }
+            }
+        });
     });
 }

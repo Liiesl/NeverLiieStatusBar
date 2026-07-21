@@ -244,3 +244,86 @@ pub fn toggle_battery_saver() -> bool {
     }
     new_val
 }
+
+// ---------------------------------------------------------------------------
+// Radio.StateChanged Event-Driven Updates
+// ---------------------------------------------------------------------------
+
+use std::sync::mpsc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WirelessEvent {
+    /// Radio state changed (Wi-Fi, Bluetooth, etc.)
+    RadioChanged,
+}
+
+static WIRELESS_EVENT_TX: Mutex<Option<mpsc::Sender<WirelessEvent>>> = Mutex::new(None);
+
+pub fn create_wireless_event_channel() -> mpsc::Receiver<WirelessEvent> {
+    let (tx, rx) = mpsc::channel();
+    *WIRELESS_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+    rx
+}
+
+fn send_wireless_event(event: WirelessEvent) {
+    if let Some(tx) = WIRELESS_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.send(event);
+    }
+}
+
+/// Start the radio event listener on a dedicated thread.
+/// Subscribes to Radio.StateChanged for Wi-Fi, Bluetooth, and other radios.
+pub fn start_radio_listener() {
+    std::thread::spawn(|| {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        rt.block_on(async {
+            loop {
+                // Enumerate all radios and subscribe to their StateChanged events
+                let radios = match Radio::GetRadiosAsync() {
+                    Ok(op) => match op.await {
+                        Ok(r) => r,
+                        Err(_) => {
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    },
+                    Err(_) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                let count = radios.Size().unwrap_or(0);
+                for i in 0..count {
+                    if let Ok(radio) = radios.GetAt(i) {
+                        use windows::Foundation::TypedEventHandler;
+                        let _ = radio.StateChanged(
+                            &TypedEventHandler::new(|_, _| {
+                                sync_all();
+                                send_wireless_event(WirelessEvent::RadioChanged);
+                                Ok(())
+                            }),
+                        );
+                    }
+                }
+
+                // Keep alive - re-enumerate periodically to catch new radios
+                // (e.g., when a USB Bluetooth adapter is plugged in)
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    // Check if we can still enumerate radios
+                    if Radio::GetRadiosAsync().is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+    });
+}

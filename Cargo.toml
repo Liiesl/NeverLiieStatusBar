@@ -51,6 +51,7 @@ windows = { version = "0.62.2", features = [
     "Security_Credentials",
     "Media_Control",
     "Storage_Streams",
+    "Foundation",
     "Foundation_Collections",
     "System",
     "System_Power",

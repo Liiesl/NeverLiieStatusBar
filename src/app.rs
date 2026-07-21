@@ -186,6 +186,14 @@ pub struct State {
     pub update_download_progress: i16,
     pub update_ready: bool,
     pub update_rx: Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<i16>>>>,
+
+    // Event channels for background listeners
+    pub audio_event_rx: Option<mpsc::Receiver<audio::AudioEvent>>,
+    pub media_event_rx: Option<mpsc::Receiver<audio::MediaEvent>>,
+    pub wireless_event_rx: Option<mpsc::Receiver<wireless::WirelessEvent>>,
+
+    // Counter for periodic brightness polling (every 10 ticks = ~2 seconds)
+    pub brightness_tick_counter: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +223,15 @@ pub fn boot() -> (State, Task<Message>) {
     let battery = battery::get_battery_info();
     let kb_layout = keyboard::get_active_layout();
     config::init_settings();
+
+    // Create event channels for background listeners
+    let audio_event_rx = audio::create_audio_event_channel();
+    let media_event_rx = audio::create_media_event_channel();
+    let wireless_event_rx = wireless::create_wireless_event_channel();
+
+    // Start background event listeners (event-driven, no polling)
+    audio::start_smtc_listener();
+    wireless::start_radio_listener();
 
     let state = State {
         visible: true,
@@ -282,6 +299,12 @@ pub fn boot() -> (State, Task<Message>) {
         update_download_progress: 0,
         update_ready: false,
         update_rx: None,
+
+        audio_event_rx: Some(audio_event_rx),
+        media_event_rx: Some(media_event_rx),
+        wireless_event_rx: Some(wireless_event_rx),
+
+        brightness_tick_counter: 0,
     };
 
     let window_settings = window::Settings {
@@ -400,6 +423,54 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             }
 
+            // Poll audio events (volume/mute changes from WASAPI callback)
+            let mut audio_changed = false;
+            if let Some(rx) = &state.audio_event_rx {
+                while rx.try_recv().is_ok() {
+                    audio_changed = true;
+                }
+            }
+            if audio_changed {
+                // Re-read audio state from the callback-updated cache
+                state.speaker_volume = audio::get_speaker_volume();
+                state.mic_volume = audio::get_mic_volume();
+                state.speaker_muted = audio::is_speaker_muted();
+                state.mic_muted = audio::is_mic_muted();
+            }
+
+            // Poll media events (SMTC changes from event listener)
+            let mut media_changed = false;
+            if let Some(rx) = &state.media_event_rx {
+                while rx.try_recv().is_ok() {
+                    media_changed = true;
+                }
+            }
+
+            // Poll wireless events (radio state changes from event listener)
+            let mut wireless_changed = false;
+            if let Some(rx) = &state.wireless_event_rx {
+                while rx.try_recv().is_ok() {
+                    wireless_changed = true;
+                }
+            }
+            if wireless_changed {
+                // Re-read wireless state from the callback-updated cache
+                let wireless = wireless::get_state();
+                state.wifi_enabled = wireless.wifi_enabled;
+                state.bluetooth_enabled = wireless.bluetooth_enabled;
+                state.airplane_enabled = wireless.airplane_enabled;
+                state.battery_saver_enabled = wireless.battery_saver_enabled;
+            }
+
+            // Periodic brightness polling (every 10 ticks ≈ 2 seconds)
+            state.brightness_tick_counter += 1;
+            if state.brightness_tick_counter >= 10 {
+                state.brightness_tick_counter = 0;
+                if let Some(b) = brightness::get_brightness() {
+                    state.brightness = b;
+                }
+            }
+
             // Poll global cursor position via Win32 API for edge dwell detection
             if let Some((sx, sy)) = win32::get_cursor_pos() {
                 state.cursor_pos = Point::new(sx, sy);
@@ -409,11 +480,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let real_hwnd = keyboard::get_real_foreground_hwnd();
             if real_hwnd != 0 {
                 state.last_real_hwnd = real_hwnd;
-            }
-
-            if state.visible {
-                win32::force_z_order(state.bar_hwnd);
-                win32::apply_window_flags(state.bar_hwnd);
             }
 
             let is_at_top = state.is_at_top_edge();
@@ -456,6 +522,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         to_y: 0.0,
                     });
                     state.visible = true;
+                    win32::force_z_order(state.bar_hwnd);
                 }
             } else {
                 if state.visible && state.hide_timer_start.is_none() {
@@ -494,9 +561,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             state.update_rx = None;
                         }
                         _ => {}
-                    }
                 }
-            Task::none()
+            }
+            if media_changed {
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(audio::get_media_state_sync)
+                            .await
+                            .unwrap_or_default()
+                    },
+                    Message::MediaStateResult,
+                )
+            } else {
+                Task::none()
+            }
         }
         Message::Frame(now) => {
             if let Some(slide) = &state.slide {
@@ -1225,8 +1303,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
             Message::ClockTick(now.format("%a %b %d   %I:%M %p").to_string())
         }),
         window::close_events().map(Message::WindowClosed),
-        time::every(Duration::from_millis(500)).map(|_| Message::SyncSettings),
-        time::every(config::audio_poll_rate()).map(|_| Message::MediaTick),
+        // SyncSettings and MediaTick removed - now event-driven via background listeners
         time::every(Duration::from_secs(5)).map(|_| Message::NetworkStatusTick),
         time::every(Duration::from_secs(30)).map(|_| Message::BatteryTick),
         time::every(Duration::from_millis(500)).map(|_| Message::KeyboardTick),
