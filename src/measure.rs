@@ -23,17 +23,12 @@ impl Operation<f32> for MeasurePopupContent {
 
     fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
         let matched = id == Some(&self.target_id);
-        eprintln!(
-            "[measure] container id={:?} matched={} bounds={}x{}",
-            id, matched, bounds.width, bounds.height
-        );
         if matched && self.result.is_none() {
             self.result = Some(bounds.height);
         }
     }
 
     fn finish(&self) -> Outcome<f32> {
-        eprintln!("[measure] finish result={:?}", self.result);
         match self.result {
             Some(height) => Outcome::Some(height),
             None => Outcome::None,
