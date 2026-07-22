@@ -778,10 +778,7 @@ async fn get_all_media_players_inner() -> Vec<MediaPlayerState> {
 }
 
 pub fn get_all_media_players_sync() -> Vec<MediaPlayerState> {
-    eprintln!("[SMTC] get_all_media_players_sync called");
-    let result = block_on_smtc(get_all_media_players_inner());
-    eprintln!("[SMTC] get_all_media_players_sync returning {} players", result.len());
-    result
+    block_on_smtc(get_all_media_players_inner())
 }
 
 pub fn media_toggle_play_sync(player_id: &str) {
@@ -872,7 +869,6 @@ pub fn create_media_event_channel() -> mpsc::Receiver<MediaEvent> {
 }
 
 fn send_media_event(event: MediaEvent) {
-    eprintln!("[SMTC] send_media_event: {event:?}");
     if let Some(tx) = MEDIA_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         let _ = tx.send(event);
     }
@@ -902,16 +898,12 @@ unsafe fn subscribe_to_session(
         return;
     }
 
-    eprintln!("[SMTC] Subscribing to session: {id}");
-
     let _ = session.MediaPropertiesChanged(&TypedEventHandler::new(move |_, _| {
-        eprintln!("[SMTC] MediaPropertiesChanged");
         send_media_event(MediaEvent::Changed);
         Ok(())
     }));
 
     let _ = session.PlaybackInfoChanged(&TypedEventHandler::new(move |_, _| {
-        eprintln!("[SMTC] PlaybackInfoChanged");
         send_media_event(MediaEvent::Changed);
         Ok(())
     }));
@@ -922,13 +914,10 @@ unsafe fn subscribe_to_session(
 /// Called by the SessionsChanged callback. Diffs known sessions against current
 /// sessions and subscribes to any new ones.
 fn on_sessions_changed() {
-    eprintln!("[SMTC] on_sessions_changed called");
-
     let mgr = match SMTC_MANAGER.lock() {
         Ok(guard) => match guard.as_ref() {
             Some(m) => m.clone(),
             None => {
-                eprintln!("[SMTC] on_sessions_changed: no manager stored");
                 return;
             }
         },
@@ -937,8 +926,7 @@ fn on_sessions_changed() {
 
     let sessions = match mgr.GetSessions() {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("[SMTC] GetSessions failed: {e}");
+        Err(_) => {
             return;
         }
     };
@@ -948,7 +936,6 @@ fn on_sessions_changed() {
         unsafe { subscribe_to_session(&session, &mut known_ids) };
     }
 
-    eprintln!("[SMTC] on_sessions_changed: {} sessions tracked", known_ids.len());
     send_media_event(MediaEvent::Changed);
 }
 
@@ -957,15 +944,11 @@ fn on_sessions_changed() {
 /// itself detects new sessions and subscribes to their events.
 pub fn start_smtc_listener() {
     std::thread::spawn(|| {
-        eprintln!("[SMTC] Listener thread started");
-
         // Initialize COM on this thread — all WinRT calls happen here
         unsafe {
             let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let _ = hr;
         }
-
-        eprintln!("[SMTC] COM initialized on listener thread");
 
         // Get the SMTC manager once
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -973,8 +956,7 @@ pub fn start_smtc_listener() {
             .build()
         {
             Ok(r) => r,
-            Err(e) => {
-                eprintln!("[SMTC] Failed to create runtime: {e}");
+            Err(_) => {
                 return;
             }
         };
@@ -982,15 +964,13 @@ pub fn start_smtc_listener() {
         let mgr = rt.block_on(async {
             let op = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
                 Ok(op) => op,
-                Err(e) => {
-                    eprintln!("[SMTC] RequestAsync failed: {e}");
+                Err(_) => {
                     return None;
                 }
             };
             match op.await {
                 Ok(m) => Some(m),
-                Err(e) => {
-                    eprintln!("[SMTC] RequestAsync await failed: {e}");
+                Err(_) => {
                     None
                 }
             }
@@ -999,12 +979,9 @@ pub fn start_smtc_listener() {
         let mgr = match mgr {
             Some(m) => m,
             None => {
-                eprintln!("[SMTC] No SMTC manager available");
                 return;
             }
         };
-
-        eprintln!("[SMTC] Got SMTC manager");
 
         // Store in static so the callback can access it
         if let Ok(mut guard) = SMTC_MANAGER.lock() {
@@ -1014,17 +991,12 @@ pub fn start_smtc_listener() {
         // Subscribe to SessionsChanged ONCE
         use windows::Foundation::TypedEventHandler;
         let _ = mgr.SessionsChanged(&TypedEventHandler::new(|_, _| {
-            eprintln!("[SMTC] SessionsChanged callback fired");
             on_sessions_changed();
             Ok(())
         }));
 
-        eprintln!("[SMTC] Subscribed to SessionsChanged");
-
         // Do initial session enumeration + subscription
         on_sessions_changed();
-
-        eprintln!("[SMTC] Listener initialized, waiting for events...");
 
         // Keep the thread alive. The COM apartment must stay alive for
         // WinRT event callbacks to keep firing.

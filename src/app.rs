@@ -441,7 +441,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(rx) = &state.media_event_rx {
                 while rx.try_recv().is_ok() {
                     media_changed = true;
-                    eprintln!("[SMTC] MonitorTick: media event received, will refresh players");
                 }
             }
 
@@ -563,7 +562,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             }
             if media_changed {
-                eprintln!("[SMTC] MonitorTick: refreshing media players after visibility logic");
                 return Task::perform(
                     async {
                         tokio::task::spawn_blocking(audio::get_all_media_players_sync)
@@ -884,10 +882,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             )
         }
         Message::MediaStateResult(players) => {
-            eprintln!("[SMTC] MediaStateResult: {} players", players.len());
-            for (i, p) in players.iter().enumerate() {
-                eprintln!("[SMTC]   [{i}] id={} title={} artist={} playing={}", p.id, p.title, p.artist, p.is_playing);
-            }
             // Update thumbnail handles only if thumbnails changed
             let old_thumbs: Vec<&[u8]> = state.media_players.iter().map(|p| p.thumbnail.as_slice()).collect();
             let new_thumbs: Vec<&[u8]> = players.iter().map(|p| p.thumbnail.as_slice()).collect();
