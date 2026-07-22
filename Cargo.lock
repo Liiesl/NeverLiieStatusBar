@@ -2092,9 +2092,10 @@ dependencies = [
 [[package]]
 name = "neverliie-iced-widgets"
 version = "0.1.0"
-source = "git+https://github.com/Liiesl/NeverLiieIcedWidgets?rev=4688a922f86488107a222373b81f78965c54f60f#4688a922f86488107a222373b81f78965c54f60f"
+source = "git+https://github.com/Liiesl/NeverLiieIcedWidgets?rev=3cd1e07#3cd1e07f770952c8e24e31d196573d5c33dcf437"
 dependencies = [
  "iced",
+ "num-traits",
 ]
 
 [[package]]

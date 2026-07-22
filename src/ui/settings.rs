@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, scrollable, slider, text, Space};
 use iced::{Color, Element, Length, Padding, Theme};
+use neverliie_iced_widgets::slider_tooltip::SliderTooltip;
 
 use crate::app::{Message, SettingsPage};
 use crate::config;
@@ -226,7 +227,7 @@ fn settings_slider(
         .width(Length::Fixed(70.0))
         .align_x(iced::Alignment::End);
 
-    let sl = slider(range, value, on_change)
+    let sl = SliderTooltip::new(range, value, on_change)
         .height(4)
         .style(|_theme: &Theme, status: slider::Status| {
             let handle_color = Color::WHITE;

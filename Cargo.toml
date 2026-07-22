@@ -62,7 +62,7 @@ windows-collections = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 velopack = "1.2"
 wmi = "0.18.1"
-neverliie-iced-widgets = { git = "https://github.com/Liiesl/NeverLiieIcedWidgets", rev = "4688a922f86488107a222373b81f78965c54f60f" }
+neverliie-iced-widgets = { git = "https://github.com/Liiesl/NeverLiieIcedWidgets", rev = "3cd1e07" }
 
 [patch.crates-io]
 iced = { path = "iced" }

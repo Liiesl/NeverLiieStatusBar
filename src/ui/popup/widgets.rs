@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, rule, slider, text, Space};
 use iced::{Color, Element, Length, Padding, Theme};
+use neverliie_iced_widgets::slider_tooltip::SliderTooltip;
 
 use crate::app::Message;
 use crate::config;
@@ -138,7 +139,7 @@ pub(crate) fn modern_slider(
             .into()
     };
 
-    let sl = slider(0.0..=100.0, value, on_change)
+    let sl = SliderTooltip::new(0.0..=100.0, value, on_change)
         .height(4)
         .style(|_theme: &Theme, status: slider::Status| {
             let handle_color = Color::WHITE;
