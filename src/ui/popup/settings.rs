@@ -1,9 +1,52 @@
 use iced::widget::{column, row, Space};
-use iced::{Element, Length};
+use iced::{Background, Border, Color, Element, Length, Shadow};
+
+use neverliie_iced_widgets::confirmation_dialog::{ButtonStyle, ConfirmationDialog, Style};
 
 use crate::app::{Message, PowerAction};
+use crate::config;
 
 use super::widgets::*;
+
+fn dialog_style(_theme: &iced::Theme) -> Style {
+    let bg = config::bg_color();
+    let border = config::border_color();
+    let text = config::text_color();
+
+    Style {
+        backdrop_color: Color { a: 0.5, ..Color::from_rgba(bg[0], bg[1], bg[2], bg[3]) },
+        background: Background::Color(Color::from_rgba(bg[0], bg[1], bg[2], bg[3])),
+        border: Border {
+            width: 1.0,
+            radius: 8.0.into(),
+            color: Color::from_rgba(border[0], border[1], border[2], border[3]),
+        },
+        shadow: Shadow::default(),
+        title_color: Color::from_rgba(text[0], text[1], text[2], text[3]),
+        message_color: Color::from_rgba(text[0], text[1], text[2], text[3]).scale_alpha(0.7),
+        secondary_button_background: Background::Color(Color::from_rgba(0.2, 0.2, 0.2, 1.0)),
+        secondary_button_border: Border {
+            width: 1.0,
+            radius: 4.0.into(),
+            color: Color::from_rgba(border[0], border[1], border[2], border[3]),
+        },
+        secondary_button_text_color: Color::from_rgba(text[0], text[1], text[2], text[3]),
+        button_background: Background::Color(accent_color()),
+        button_border: Border {
+            width: 0.0,
+            radius: 4.0.into(),
+            color: Color::TRANSPARENT,
+        },
+        button_text_color: Color::WHITE,
+        danger_button_background: Background::Color(Color::from_rgb(0.7, 0.2, 0.2)),
+        danger_button_border: Border {
+            width: 0.0,
+            radius: 4.0.into(),
+            color: Color::TRANSPARENT,
+        },
+        danger_button_text_color: Color::WHITE,
+    }
+}
 
 pub(crate) fn settings_popup_content(state: &crate::app::State) -> Element<'static, Message> {
     let wifi_sub = if state.wifi_enabled { "On".to_string() } else { "Off".to_string() };
@@ -123,11 +166,11 @@ pub(crate) fn settings_popup_content(state: &crate::app::State) -> Element<'stat
     }
 
     let power_row = row![
-        power_btn(lucide_icons::Icon::Lock, Message::PowerAction(PowerAction::Lock)),
-        power_btn(lucide_icons::Icon::Moon, Message::PowerAction(PowerAction::Sleep)),
-        power_btn(lucide_icons::Icon::RotateCcw, Message::PowerAction(PowerAction::Restart)),
-        power_btn(lucide_icons::Icon::Power, Message::PowerAction(PowerAction::Shutdown)),
-        power_btn(lucide_icons::Icon::EyeOff, Message::PowerAction(PowerAction::Quit)),
+        power_btn(lucide_icons::Icon::Lock, Message::ShowPowerConfirm(PowerAction::Lock)),
+        power_btn(lucide_icons::Icon::Moon, Message::ShowPowerConfirm(PowerAction::Sleep)),
+        power_btn(lucide_icons::Icon::RotateCcw, Message::ShowPowerConfirm(PowerAction::Restart)),
+        power_btn(lucide_icons::Icon::Power, Message::ShowPowerConfirm(PowerAction::Shutdown)),
+        power_btn(lucide_icons::Icon::EyeOff, Message::ShowPowerConfirm(PowerAction::Quit)),
         Space::new().width(Length::Fill),
         power_btn(
             lucide_icons::Icon::Settings,
@@ -140,5 +183,41 @@ pub(crate) fn settings_popup_content(state: &crate::app::State) -> Element<'stat
     let power_section = column![power_label, power_row].spacing(6);
 
     let content = column![grid, sliders, power_section].spacing(16);
-    content.into()
+
+    let (dialog_title, dialog_message, blocking) = match state.pending_power_action {
+        Some(PowerAction::Lock) => ("Lock PC?", "Your PC will be locked.", false),
+        Some(PowerAction::Sleep) => ("Sleep?", "Your PC will go to sleep.", false),
+        Some(PowerAction::Restart) => (
+            "Restart PC?",
+            "Your PC will restart immediately. Any unsaved work will be lost.",
+            true,
+        ),
+        Some(PowerAction::Shutdown) => (
+            "Shut Down PC?",
+            "Your PC will shut down immediately. Any unsaved work will be lost.",
+            true,
+        ),
+        Some(PowerAction::Quit) => ("Quit App?", "NeverLiie StatusBar will close.", false),
+        _ => return content.into(),
+    };
+
+    let mut dialog = ConfirmationDialog::new(content, true, dialog_title, dialog_message)
+        .on_confirm(Message::PowerConfirm)
+        .on_cancel(Message::PowerCancel)
+        .on_dismiss(Message::PowerCancel)
+        .no_pointer()
+        .style(dialog_style);
+
+    if blocking {
+        dialog = dialog.blocking();
+    }
+
+    if matches!(state.pending_power_action, Some(PowerAction::Restart) | Some(PowerAction::Shutdown)) {
+        dialog = dialog.button(
+            neverliie_iced_widgets::confirmation_dialog::DialogButton::new("Confirm", Message::PowerConfirm)
+                .style(ButtonStyle::Danger),
+        );
+    }
+
+    dialog.into()
 }

@@ -113,6 +113,9 @@ pub enum Message {
     UpdateDismiss,
     PopupResizeToContent(WindowId),
     PopupResizeApply(WindowId, f32),
+    ShowPowerConfirm(PowerAction),
+    PowerConfirm,
+    PowerCancel,
 }
 
 #[derive(Debug)]
@@ -193,6 +196,8 @@ pub struct State {
     pub wireless_event_rx: Option<mpsc::Receiver<wireless::WirelessEvent>>,
 
     pub brightness_event_rx: Option<mpsc::Receiver<brightness::BrightnessEvent>>,
+
+    pub pending_power_action: Option<PowerAction>,
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +309,8 @@ media_event_rx: Some(media_event_rx),
         wireless_event_rx: Some(wireless_event_rx),
 
         brightness_event_rx: Some(brightness_event_rx),
+
+        pending_power_action: None,
     };
 
     let window_settings = window::Settings {
@@ -953,6 +960,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .spawn();
                 }
             }
+            Task::none()
+        }
+        Message::ShowPowerConfirm(action) => {
+            state.pending_power_action = Some(action);
+            Task::none()
+        }
+        Message::PowerConfirm => {
+            if let Some(action) = state.pending_power_action.take() {
+                return update(state, Message::PowerAction(action));
+            }
+            Task::none()
+        }
+        Message::PowerCancel => {
+            state.pending_power_action = None;
             Task::none()
         }
         Message::SyncSettings => {
