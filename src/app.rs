@@ -192,8 +192,7 @@ pub struct State {
     pub media_event_rx: Option<mpsc::Receiver<audio::MediaEvent>>,
     pub wireless_event_rx: Option<mpsc::Receiver<wireless::WirelessEvent>>,
 
-    // Counter for periodic brightness polling (every 10 ticks = ~2 seconds)
-    pub brightness_tick_counter: u32,
+    pub brightness_event_rx: Option<mpsc::Receiver<brightness::BrightnessEvent>>,
 }
 
 #[derive(Debug, Clone)]
@@ -228,10 +227,12 @@ pub fn boot() -> (State, Task<Message>) {
     let audio_event_rx = audio::create_audio_event_channel();
 let media_event_rx = audio::create_media_event_channel();
     let wireless_event_rx = wireless::create_wireless_event_channel();
+    let brightness_event_rx = brightness::create_brightness_event_channel();
 
     // Start background event listeners (event-driven, no polling)
     audio::start_smtc_listener();
     wireless::start_radio_listener();
+    brightness::start_event_listener();
 
     let state = State {
         visible: true,
@@ -302,7 +303,7 @@ let media_event_rx = audio::create_media_event_channel();
 media_event_rx: Some(media_event_rx),
         wireless_event_rx: Some(wireless_event_rx),
 
-        brightness_tick_counter: 0,
+        brightness_event_rx: Some(brightness_event_rx),
     };
 
     let window_settings = window::Settings {
@@ -460,12 +461,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.battery_saver_enabled = wireless.battery_saver_enabled;
             }
 
-            // Periodic brightness polling (every 10 ticks ≈ 2 seconds)
-            state.brightness_tick_counter += 1;
-            if state.brightness_tick_counter >= 10 {
-                state.brightness_tick_counter = 0;
-                if let Some(b) = brightness::get_brightness() {
-                    state.brightness = b;
+            // Poll brightness events (WMI change notifications)
+            if let Some(rx) = &state.brightness_event_rx {
+                while let Ok(brightness::BrightnessEvent::Changed(results)) = rx.try_recv() {
+                    if let Some(b) = results.first() {
+                        state.brightness = b.current_brightness as f32;
+                    }
                 }
             }
 

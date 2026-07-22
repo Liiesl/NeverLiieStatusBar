@@ -61,6 +61,7 @@ windows-core = "0.62"
 windows-collections = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 velopack = "1.2"
+wmi = "0.18.1"
 
 [patch.crates-io]
 iced = { path = "iced" }

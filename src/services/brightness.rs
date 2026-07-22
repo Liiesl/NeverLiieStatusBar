@@ -1,126 +1,149 @@
-use std::sync::Mutex;
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows::Win32::System::Wmi::{
-    WbemLocator, IWbemLocator, IWbemServices, IWbemClassObject,
-    WBEM_GENERIC_FLAG_TYPE,
-};
-use windows::Win32::System::Variant::VARIANT;
-use windows_core::BSTR;
+#![allow(dead_code, non_snake_case)]
 
-static BRIGHTNESS_STATE: Mutex<Option<f32>> = Mutex::new(None);
+use std::sync::{Mutex, mpsc};
 
-unsafe fn wmi_connect() -> Option<IWbemServices> {
-    let locator: IWbemLocator = unsafe {
-        CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).ok()?
-    };
-    let empty = BSTR::new();
-    let root = BSTR::from("root\\WMI");
-    unsafe {
-        locator.ConnectServer(
-            &root, &empty, &empty, &empty, 0, &empty, None,
-        ).ok()
+use serde::{Deserialize, Serialize};
+use wmi::WMIConnection;
+
+// ---------------------------------------------------------------------------
+// Domain structs (WMI)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WmiMonitorBrightness {
+    pub current_brightness: u8,
+    pub instance_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct WmiMonitorBrightnessEvent {
+    #[allow(unused)]
+    active: bool,
+    brightness: u8,
+    #[allow(unused)]
+    instance_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct WmiMonitorBrightnessMethods {
+    #[serde(rename = "__Path")]
+    __path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct WmiSetBrightnessPayload {
+    timeout: u32,
+    brightness: u8,
+}
+
+// ---------------------------------------------------------------------------
+// Event channel
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum BrightnessEvent {
+    Changed(Vec<WmiMonitorBrightness>),
+}
+
+static BRIGHTNESS_EVENT_TX: Mutex<Option<mpsc::Sender<BrightnessEvent>>> = Mutex::new(None);
+
+pub fn create_brightness_event_channel() -> mpsc::Receiver<BrightnessEvent> {
+    let (tx, rx) = mpsc::channel();
+    *BRIGHTNESS_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+    rx
+}
+
+fn send_event(event: BrightnessEvent) {
+    if let Some(tx) = BRIGHTNESS_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.send(event);
     }
 }
 
-unsafe fn wmi_get_brightness_inner() -> Option<f32> {
-    let services = unsafe { wmi_connect() }?;
-    let lang = BSTR::from("WQL");
-    let query = BSTR::from("SELECT * FROM WmiMonitorBrightness");
-    let flags = WBEM_GENERIC_FLAG_TYPE(48);
+// ---------------------------------------------------------------------------
+// WMI operations
+// ---------------------------------------------------------------------------
 
-    let enumerator = unsafe { services.ExecQuery(&lang, &query, flags, None).ok()? };
-
-    let mut obj: Option<IWbemClassObject> = None;
-    let mut returned = 0u32;
-    unsafe {
-        if enumerator.Next(-1, std::slice::from_mut(&mut obj), &mut returned).is_err() {
-            return None;
-        }
-    }
-
-    let obj = obj?;
-    let mut variant = VARIANT::default();
-    let prop = BSTR::from("CurrentBrightness");
-    unsafe { obj.Get(&prop, 0, &mut variant, None, None).ok()? };
-    unsafe { Some(variant.Anonymous.Anonymous.Anonymous.lVal as f32) }
+fn wmi_query_brightness() -> Option<Vec<WmiMonitorBrightness>> {
+    let wmi = WMIConnection::with_namespace_path("ROOT\\WMI").ok()?;
+    wmi.query().ok()
 }
 
-unsafe fn wmi_set_brightness_inner(percent: u32) -> bool {
-    let services = match unsafe { wmi_connect() } {
-        Some(s) => s,
-        None => return false,
-    };
-
-    let lang = BSTR::from("WQL");
-    let query = BSTR::from("SELECT * FROM WmiMonitorBrightnessMethods");
-    let flags = WBEM_GENERIC_FLAG_TYPE(48);
-
-    let class_enum = match unsafe { services.ExecQuery(&lang, &query, flags, None) } {
-        Ok(e) => e,
+fn wmi_set_brightness(percent: u32) -> bool {
+    let wmi = match WMIConnection::with_namespace_path("ROOT\\WMI") {
+        Ok(w) => w,
         Err(_) => return false,
     };
 
-    let mut obj: Option<IWbemClassObject> = None;
-    let mut returned = 0u32;
-    unsafe {
-        if class_enum.Next(-1, std::slice::from_mut(&mut obj), &mut returned).is_err() {
-            return false;
-        }
-    }
+    let instances: Vec<WmiMonitorBrightnessMethods> = match wmi.query() {
+        Ok(i) => i,
+        Err(_) => return false,
+    };
 
-    let obj = match obj {
+    let obj = match instances.first() {
         Some(o) => o,
         None => return false,
     };
 
-    let in_params = match unsafe { obj.SpawnInstance(0) } {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let timeout_prop = BSTR::from("Timeout");
-    let timeout_val = VARIANT::from(0u32);
-    unsafe { let _ = in_params.Put(&timeout_prop, 0, &timeout_val, 0); }
-
-    let brightness_prop = BSTR::from("Brightness");
-    let brightness_val = VARIANT::from(percent as u8);
-    unsafe { let _ = in_params.Put(&brightness_prop, 0, &brightness_val, 0); }
-
-    let method = BSTR::from("WmiSetBrightness");
-    let obj_path = BSTR::from("WmiMonitorBrightnessMethods=@");
-    unsafe {
-        services.ExecMethod(&obj_path, &method, WBEM_GENERIC_FLAG_TYPE(0), None, Some(&in_params), None, None).is_ok()
-    }
+    wmi.exec_instance_method::<WmiMonitorBrightnessMethods, ()>(
+        obj.__path.clone(),
+        "WmiSetBrightness",
+        WmiSetBrightnessPayload {
+            timeout: 0,
+            brightness: percent as u8,
+        },
+    )
+    .is_ok()
 }
 
-fn wmi_get_brightness() -> Option<f32> {
-    unsafe { wmi_get_brightness_inner() }
-}
-
-fn wmi_set_brightness(percent: f32) -> bool {
-    unsafe { wmi_set_brightness_inner(percent as u32) }
-}
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 pub fn get_brightness() -> Option<f32> {
-    if let Some(cached) = *BRIGHTNESS_STATE.lock().unwrap_or_else(|e| e.into_inner()) {
-        return Some(cached);
-    }
-    let value = wmi_get_brightness()?;
-    *BRIGHTNESS_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
-    Some(value)
+    let results = wmi_query_brightness()?;
+    results.first().map(|b| b.current_brightness as f32)
 }
 
 pub fn set_brightness(percent: f32) {
     let clamped = percent.clamp(0.0, 100.0);
-    *BRIGHTNESS_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(clamped);
     std::thread::spawn(move || {
-        wmi_set_brightness(clamped);
+        wmi_set_brightness(clamped as u32);
     });
 }
 
-#[allow(dead_code)]
 pub fn sync_all() {
-    if let Some(val) = wmi_get_brightness() {
-        *BRIGHTNESS_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(val);
+    if let Some(results) = wmi_query_brightness() {
+        send_event(BrightnessEvent::Changed(results));
     }
+}
+
+/// Spawn a background thread that listens for WMI brightness change events.
+pub fn start_event_listener() {
+    std::thread::spawn(|| {
+        let wmi = match WMIConnection::with_namespace_path("ROOT\\WMI") {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        // Send initial state
+        if let Ok(results) = wmi.query::<WmiMonitorBrightness>() {
+            send_event(BrightnessEvent::Changed(results));
+        }
+
+        // Listen for brightness change events
+        for event_result in wmi
+            .notification::<WmiMonitorBrightnessEvent>()
+            .into_iter()
+            .flatten()
+        {
+            let _ = event_result; // we don't care about the event payload, just that it fired
+            if let Ok(results) = wmi.query::<WmiMonitorBrightness>() {
+                send_event(BrightnessEvent::Changed(results));
+            }
+        }
+    });
 }
