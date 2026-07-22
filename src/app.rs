@@ -72,11 +72,12 @@ pub enum Message {
     AudioScanResult(Vec<audio::AudioDevice>, Vec<audio::AudioDevice>),
     AudioSelectDevice { device_id: String, is_input: bool },
     AudioSelectDeviceResult(bool),
+
     MediaTick,
-    MediaTogglePlay,
-    MediaNextTrack,
-    MediaPrevTrack,
-    MediaStateResult(audio::MediaState),
+    MediaTogglePlay(String),
+    MediaNextTrack(String),
+    MediaPrevTrack(String),
+    MediaStateResult(Vec<audio::MediaPlayerState>),
     ToggleWifi,
     ToggleBluetooth,
     ToggleAirplane,
@@ -149,11 +150,9 @@ pub struct State {
     pub input_devices: Vec<audio::AudioDevice>,
     pub current_output_device_id: Option<String>,
     pub current_input_device_id: Option<String>,
-    pub media_title: String,
-    pub media_artist: String,
-    pub media_thumbnail: Vec<u8>,
-    pub media_is_playing: bool,
-    pub media_has_session: bool,
+    pub media_players: Vec<audio::MediaPlayerState>,
+    pub media_player_thumbnail_handles: Vec<Option<iced::widget::image::Handle>>,
+
     pub wifi_enabled: bool,
     pub bluetooth_enabled: bool,
     pub airplane_enabled: bool,
@@ -189,6 +188,7 @@ pub struct State {
 
     // Event channels for background listeners
     pub audio_event_rx: Option<mpsc::Receiver<audio::AudioEvent>>,
+
     pub media_event_rx: Option<mpsc::Receiver<audio::MediaEvent>>,
     pub wireless_event_rx: Option<mpsc::Receiver<wireless::WirelessEvent>>,
 
@@ -226,7 +226,7 @@ pub fn boot() -> (State, Task<Message>) {
 
     // Create event channels for background listeners
     let audio_event_rx = audio::create_audio_event_channel();
-    let media_event_rx = audio::create_media_event_channel();
+let media_event_rx = audio::create_media_event_channel();
     let wireless_event_rx = wireless::create_wireless_event_channel();
 
     // Start background event listeners (event-driven, no polling)
@@ -260,11 +260,9 @@ pub fn boot() -> (State, Task<Message>) {
         input_devices: Vec::new(),
         current_output_device_id: audio::get_current_output_device_id(),
         current_input_device_id: audio::get_current_input_device_id(),
-        media_title: String::new(),
-        media_artist: String::new(),
-        media_thumbnail: Vec::new(),
-        media_is_playing: false,
-        media_has_session: false,
+        media_players: Vec::new(),
+        media_player_thumbnail_handles: Vec::new(),
+
         wifi_enabled: wireless.wifi_enabled,
         bluetooth_enabled: wireless.bluetooth_enabled,
         airplane_enabled: wireless.airplane_enabled,
@@ -301,7 +299,7 @@ pub fn boot() -> (State, Task<Message>) {
         update_rx: None,
 
         audio_event_rx: Some(audio_event_rx),
-        media_event_rx: Some(media_event_rx),
+media_event_rx: Some(media_event_rx),
         wireless_event_rx: Some(wireless_event_rx),
 
         brightness_tick_counter: 0,
@@ -443,6 +441,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(rx) = &state.media_event_rx {
                 while rx.try_recv().is_ok() {
                     media_changed = true;
+                    eprintln!("[SMTC] MonitorTick: media event received, will refresh players");
                 }
             }
 
@@ -564,17 +563,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             }
             if media_changed {
-                Task::perform(
+                eprintln!("[SMTC] MonitorTick: refreshing media players after visibility logic");
+                return Task::perform(
                     async {
-                        tokio::task::spawn_blocking(audio::get_media_state_sync)
+                        tokio::task::spawn_blocking(audio::get_all_media_players_sync)
                             .await
                             .unwrap_or_default()
                     },
                     Message::MediaStateResult,
-                )
-            } else {
-                Task::none()
+                );
             }
+            Task::none()
         }
         Message::Frame(now) => {
             if let Some(slide) = &state.slide {
@@ -829,39 +828,45 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::MediaTogglePlay => {
+        Message::MediaTogglePlay(player_id) => {
+            let pid = player_id.clone();
             Task::perform(
-                async {
-                    tokio::task::spawn_blocking(audio::media_toggle_play_sync)
+                async move {
+                    let pid2 = pid.clone();
+                    tokio::task::spawn_blocking(move || audio::media_toggle_play_sync(&pid2))
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_all_media_players_sync)
                         .await
                         .unwrap_or_default()
                 },
                 Message::MediaStateResult,
             )
         }
-        Message::MediaNextTrack => {
+        Message::MediaNextTrack(player_id) => {
+            let pid = player_id.clone();
             Task::perform(
-                async {
-                    tokio::task::spawn_blocking(audio::media_next_track_sync)
+                async move {
+                    let pid2 = pid.clone();
+                    tokio::task::spawn_blocking(move || audio::media_next_track_sync(&pid2))
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_all_media_players_sync)
                         .await
                         .unwrap_or_default()
                 },
                 Message::MediaStateResult,
             )
         }
-        Message::MediaPrevTrack => {
+        Message::MediaPrevTrack(player_id) => {
+            let pid = player_id.clone();
             Task::perform(
-                async {
-                    tokio::task::spawn_blocking(audio::media_prev_track_sync)
+                async move {
+                    let pid2 = pid.clone();
+                    tokio::task::spawn_blocking(move || audio::media_prev_track_sync(&pid2))
                         .await
                         .ok();
-                    tokio::task::spawn_blocking(audio::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_all_media_players_sync)
                         .await
                         .unwrap_or_default()
                 },
@@ -871,19 +876,33 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaTick => {
             Task::perform(
                 async {
-                    tokio::task::spawn_blocking(audio::get_media_state_sync)
+                    tokio::task::spawn_blocking(audio::get_all_media_players_sync)
                         .await
                         .unwrap_or_default()
                 },
                 Message::MediaStateResult,
             )
         }
-        Message::MediaStateResult(media) => {
-            state.media_title = media.title;
-            state.media_artist = media.artist;
-            state.media_thumbnail = media.thumbnail;
-            state.media_is_playing = media.is_playing;
-            state.media_has_session = media.has_session;
+        Message::MediaStateResult(players) => {
+            eprintln!("[SMTC] MediaStateResult: {} players", players.len());
+            for (i, p) in players.iter().enumerate() {
+                eprintln!("[SMTC]   [{i}] id={} title={} artist={} playing={}", p.id, p.title, p.artist, p.is_playing);
+            }
+            // Update thumbnail handles only if thumbnails changed
+            let old_thumbs: Vec<&[u8]> = state.media_players.iter().map(|p| p.thumbnail.as_slice()).collect();
+            let new_thumbs: Vec<&[u8]> = players.iter().map(|p| p.thumbnail.as_slice()).collect();
+
+            if old_thumbs != new_thumbs {
+                state.media_player_thumbnail_handles = players.iter().map(|p| {
+                    if p.thumbnail.is_empty() {
+                        None
+                    } else {
+                        Some(iced::widget::image::Handle::from_bytes(p.thumbnail.clone()))
+                    }
+                }).collect();
+            }
+
+            state.media_players = players;
             Task::none()
         }
         Message::ToggleWifi => {

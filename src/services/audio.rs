@@ -304,15 +304,6 @@ pub struct AudioDevice {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct MediaState {
-    pub title: String,
-    pub artist: String,
-    pub thumbnail: Vec<u8>,
-    pub is_playing: bool,
-    pub has_session: bool,
-}
-
 // ---------------------------------------------------------------------------
 // COM helpers
 // ---------------------------------------------------------------------------
@@ -350,6 +341,7 @@ fn get_mic_interface() -> Option<IAudioEndpointVolume> {
     })
 }
 
+#[allow(dead_code)]
 fn pwstr_to_string(pwstr: &windows_core::PWSTR) -> String {
     if pwstr.0.is_null() {
         return String::new();
@@ -658,9 +650,19 @@ pub fn sync_all() {
 // ---------------------------------------------------------------------------
 
 use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
+
+#[derive(Debug, Clone)]
+pub struct MediaPlayerState {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub thumbnail: Vec<u8>,
+    pub is_playing: bool,
+}
 
 fn smtc_runtime() -> &'static tokio::runtime::Runtime {
     use std::sync::OnceLock;
@@ -726,90 +728,128 @@ async fn fetch_thumbnail_bytes(
     buf
 }
 
-async fn get_media_state_inner() -> MediaState {
+async fn get_player_state(session: &GlobalSystemMediaTransportControlsSession) -> Option<MediaPlayerState> {
+    let id = session.SourceAppUserModelId().ok()?.to_string();
+
+    let is_playing = session.GetPlaybackInfo()
+        .ok()
+        .and_then(|info| info.PlaybackStatus().ok())
+        .map(|status| status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
+        .unwrap_or(false);
+
+    let props = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
+
+    let title = props.Title().ok().map(|t| t.to_string()).unwrap_or_default();
+    let artist = props.Artist().ok().map(|a| a.to_string()).unwrap_or_default();
+
+    let thumbnail = if let Ok(thumb_ref) = props.Thumbnail() {
+        fetch_thumbnail_bytes(&thumb_ref).await
+    } else {
+        Vec::new()
+    };
+
+    Some(MediaPlayerState {
+        id,
+        title,
+        artist,
+        thumbnail,
+        is_playing,
+    })
+}
+
+async fn get_all_media_players_inner() -> Vec<MediaPlayerState> {
     let mgr = match get_smtc_manager().await {
         Some(m) => m,
-        None => return MediaState::default(),
+        None => return Vec::new(),
     };
 
-    let session = match mgr.GetCurrentSession() {
+    let sessions = match mgr.GetSessions() {
         Ok(s) => s,
-        Err(_) => return MediaState::default(),
+        Err(_) => return Vec::new(),
     };
 
-    let mut state = MediaState {
-        has_session: true,
-        ..Default::default()
-    };
-
-    if let Ok(info) = session.GetPlaybackInfo()
-        && let Ok(status) = info.PlaybackStatus() {
-            state.is_playing =
-                status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+    let mut players = Vec::new();
+    for session in sessions.into_iter() {
+        if let Some(state) = get_player_state(&session).await {
+            players.push(state);
         }
-
-    if let Ok(props_op) = session.TryGetMediaPropertiesAsync()
-        && let Ok(props) = props_op.await {
-            state.title = props
-                .Title()
-                .ok()
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "Unknown Title".to_string());
-            state.artist = props
-                .Artist()
-                .ok()
-                .map(|a| a.to_string())
-                .unwrap_or_default();
-
-            if let Ok(thumb_ref) = props.Thumbnail() {
-                state.thumbnail = fetch_thumbnail_bytes(&thumb_ref).await;
-            }
-        }
-
-    state
+    }
+    players
 }
 
-/// Synchronous wrapper - only call from spawn_blocking or non-tokio threads
-pub fn get_media_state_sync() -> MediaState {
-    block_on_smtc(get_media_state_inner())
+pub fn get_all_media_players_sync() -> Vec<MediaPlayerState> {
+    eprintln!("[SMTC] get_all_media_players_sync called");
+    let result = block_on_smtc(get_all_media_players_inner());
+    eprintln!("[SMTC] get_all_media_players_sync returning {} players", result.len());
+    result
 }
 
-pub fn media_toggle_play_sync() {
+pub fn media_toggle_play_sync(player_id: &str) {
     block_on_smtc(async {
         let mgr = match get_smtc_manager().await {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession()
-            && let Ok(op) = session.TryTogglePlayPauseAsync() {
-                let _ = op.await;
+        let sessions = match mgr.GetSessions() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        for session in sessions.into_iter() {
+            if let Ok(id) = session.SourceAppUserModelId() {
+                if id.to_string() == player_id {
+                    if let Ok(op) = session.TryTogglePlayPauseAsync() {
+                        let _ = op.await;
+                    }
+                    return;
+                }
             }
+        }
     });
 }
 
-pub fn media_next_track_sync() {
+pub fn media_next_track_sync(player_id: &str) {
     block_on_smtc(async {
         let mgr = match get_smtc_manager().await {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession()
-            && let Ok(op) = session.TrySkipNextAsync() {
-                let _ = op.await;
+        let sessions = match mgr.GetSessions() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        for session in sessions.into_iter() {
+            if let Ok(id) = session.SourceAppUserModelId() {
+                if id.to_string() == player_id {
+                    if let Ok(op) = session.TrySkipNextAsync() {
+                        let _ = op.await;
+                    }
+                    return;
+                }
             }
+        }
     });
 }
 
-pub fn media_prev_track_sync() {
+pub fn media_prev_track_sync(player_id: &str) {
     block_on_smtc(async {
         let mgr = match get_smtc_manager().await {
             Some(m) => m,
             None => return,
         };
-        if let Ok(session) = mgr.GetCurrentSession()
-            && let Ok(op) = session.TrySkipPreviousAsync() {
-                let _ = op.await;
+        let sessions = match mgr.GetSessions() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        for session in sessions.into_iter() {
+            if let Ok(id) = session.SourceAppUserModelId() {
+                if id.to_string() == player_id {
+                    if let Ok(op) = session.TrySkipPreviousAsync() {
+                        let _ = op.await;
+                    }
+                    return;
+                }
             }
+        }
     });
 }
 
@@ -819,8 +859,8 @@ pub fn media_prev_track_sync() {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaEvent {
-    /// Current media session changed or updated
-    SessionChanged,
+    /// Sessions changed or updated — re-enumerate all players
+    Changed,
 }
 
 static MEDIA_EVENT_TX: Mutex<Option<mpsc::Sender<MediaEvent>>> = Mutex::new(None);
@@ -832,75 +872,170 @@ pub fn create_media_event_channel() -> mpsc::Receiver<MediaEvent> {
 }
 
 fn send_media_event(event: MediaEvent) {
+    eprintln!("[SMTC] send_media_event: {event:?}");
     if let Some(tx) = MEDIA_EVENT_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         let _ = tx.send(event);
     }
 }
 
+// We store the SMTC manager in a static so the SessionsChanged callback can
+// access it to enumerate sessions. This is safe because the manager is
+// reference-counted internally and never drops while events are registered.
+static SMTC_MANAGER: Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>> =
+    Mutex::new(None);
+
+/// Subscribe to per-session events (properties + playback) for a single session.
+/// Returns Ok(()) on success. Safe to call multiple times for the same session —
+/// the OS deduplicates, but we track IDs to avoid redundancy.
+unsafe fn subscribe_to_session(
+    session: &GlobalSystemMediaTransportControlsSession,
+    known_ids: &mut std::collections::HashSet<String>,
+) {
+    use windows::Foundation::TypedEventHandler;
+
+    let id = match session.SourceAppUserModelId() {
+        Ok(id) => id.to_string(),
+        Err(_) => return,
+    };
+
+    if known_ids.contains(&id) {
+        return;
+    }
+
+    eprintln!("[SMTC] Subscribing to session: {id}");
+
+    let _ = session.MediaPropertiesChanged(&TypedEventHandler::new(move |_, _| {
+        eprintln!("[SMTC] MediaPropertiesChanged");
+        send_media_event(MediaEvent::Changed);
+        Ok(())
+    }));
+
+    let _ = session.PlaybackInfoChanged(&TypedEventHandler::new(move |_, _| {
+        eprintln!("[SMTC] PlaybackInfoChanged");
+        send_media_event(MediaEvent::Changed);
+        Ok(())
+    }));
+
+    known_ids.insert(id);
+}
+
+/// Called by the SessionsChanged callback. Diffs known sessions against current
+/// sessions and subscribes to any new ones.
+fn on_sessions_changed() {
+    eprintln!("[SMTC] on_sessions_changed called");
+
+    let mgr = match SMTC_MANAGER.lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(m) => m.clone(),
+            None => {
+                eprintln!("[SMTC] on_sessions_changed: no manager stored");
+                return;
+            }
+        },
+        Err(_) => return,
+    };
+
+    let sessions = match mgr.GetSessions() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[SMTC] GetSessions failed: {e}");
+            return;
+        }
+    };
+
+    let mut known_ids = std::collections::HashSet::new();
+    for session in sessions.into_iter() {
+        unsafe { subscribe_to_session(&session, &mut known_ids) };
+    }
+
+    eprintln!("[SMTC] on_sessions_changed: {} sessions tracked", known_ids.len());
+    send_media_event(MediaEvent::Changed);
+}
+
 /// Start the SMTC event listener on a dedicated thread.
-/// Subscribes to SessionsChanged + per-session property/playback events.
+/// Subscribes to manager SessionsChanged ONCE. The SessionsChanged callback
+/// itself detects new sessions and subscribes to their events.
 pub fn start_smtc_listener() {
     std::thread::spawn(|| {
+        eprintln!("[SMTC] Listener thread started");
+
+        // Initialize COM on this thread — all WinRT calls happen here
+        unsafe {
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let _ = hr;
+        }
+
+        eprintln!("[SMTC] COM initialized on listener thread");
+
+        // Get the SMTC manager once
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
             Ok(r) => r,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!("[SMTC] Failed to create runtime: {e}");
+                return;
+            }
         };
 
-        rt.block_on(async {
-            loop {
-                let mgr = match get_smtc_manager().await {
-                    Some(m) => m,
-                    None => {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        continue;
-                    }
-                };
-
-                // Get the current session and subscribe to its events
-                if let Ok(session) = mgr.GetCurrentSession() {
-                    // Subscribe to session events using TypedEventHandler
-                    use windows::Foundation::TypedEventHandler;
-                    let _ = session.MediaPropertiesChanged(
-                        &TypedEventHandler::new(|_, _| {
-                            send_media_event(MediaEvent::SessionChanged);
-                            Ok(())
-                        }),
-                    );
-                    let _ = session.PlaybackInfoChanged(
-                        &TypedEventHandler::new(|_, _| {
-                            send_media_event(MediaEvent::SessionChanged);
-                            Ok(())
-                        }),
-                    );
-                    let _ = session.TimelinePropertiesChanged(
-                        &TypedEventHandler::new(|_, _| {
-                            send_media_event(MediaEvent::SessionChanged);
-                            Ok(())
-                        }),
-                    );
+        let mgr = rt.block_on(async {
+            let op = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+                Ok(op) => op,
+                Err(e) => {
+                    eprintln!("[SMTC] RequestAsync failed: {e}");
+                    return None;
                 }
-
-                // Subscribe to SessionsChanged to detect new/removed sessions
-                use windows::Foundation::TypedEventHandler;
-                let _ = mgr.SessionsChanged(
-                    &TypedEventHandler::new(|_, _| {
-                        send_media_event(MediaEvent::SessionChanged);
-                        Ok(())
-                    }),
-                );
-
-                // Keep the listener alive - re-check periodically for session changes
-                loop {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    if mgr.GetCurrentSession().is_err() {
-                        send_media_event(MediaEvent::SessionChanged);
-                        break;
-                    }
+            };
+            match op.await {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    eprintln!("[SMTC] RequestAsync await failed: {e}");
+                    None
                 }
             }
         });
+
+        let mgr = match mgr {
+            Some(m) => m,
+            None => {
+                eprintln!("[SMTC] No SMTC manager available");
+                return;
+            }
+        };
+
+        eprintln!("[SMTC] Got SMTC manager");
+
+        // Store in static so the callback can access it
+        if let Ok(mut guard) = SMTC_MANAGER.lock() {
+            *guard = Some(mgr.clone());
+        }
+
+        // Subscribe to SessionsChanged ONCE
+        use windows::Foundation::TypedEventHandler;
+        let _ = mgr.SessionsChanged(&TypedEventHandler::new(|_, _| {
+            eprintln!("[SMTC] SessionsChanged callback fired");
+            on_sessions_changed();
+            Ok(())
+        }));
+
+        eprintln!("[SMTC] Subscribed to SessionsChanged");
+
+        // Do initial session enumeration + subscription
+        on_sessions_changed();
+
+        eprintln!("[SMTC] Listener initialized, waiting for events...");
+
+        // Keep the thread alive. The COM apartment must stay alive for
+        // WinRT event callbacks to keep firing.
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+
+        // unreachable but needed for type inference
+        #[allow(unreachable_code)]
+        {
+            drop(rt);
+        }
     });
 }

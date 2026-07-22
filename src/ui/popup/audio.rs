@@ -83,10 +83,15 @@ pub(crate) fn audio_popup_content(state: &crate::app::State) -> Element<'static,
     let mut content = column![sliders, divider(), output_section, divider(), input_section]
         .spacing(12);
 
-    if state.media_has_session || !state.media_title.is_empty() {
+    if !state.media_players.is_empty() {
+        let mut media_list = column![].spacing(6);
+        for (i, player) in state.media_players.iter().enumerate() {
+            let thumb_handle = state.media_player_thumbnail_handles.get(i).and_then(|h| h.as_ref());
+            media_list = media_list.push(media_control_card(player, thumb_handle, i));
+        }
         let media_section = column![
-            section_label("Media Player"),
-            media_control_card(state),
+            section_label("Media Players"),
+            media_list,
         ]
         .spacing(4);
         content = content.push(divider()).push(media_section);

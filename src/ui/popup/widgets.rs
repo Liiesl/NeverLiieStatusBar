@@ -350,35 +350,29 @@ pub(crate) fn device_list_item(
         .into()
 }
 
-pub(crate) fn media_control_card(state: &crate::app::State) -> Element<'static, Message> {
-    let title_text = if state.media_title.is_empty() {
+pub(crate) fn media_control_card(
+    player: &crate::services::audio::MediaPlayerState,
+    thumbnail_handle: Option<&iced::widget::image::Handle>,
+    _player_index: usize,
+) -> Element<'static, Message> {
+    let title_text = if player.title.is_empty() {
         "No Media".to_string()
-    } else if state.media_title.len() > 30 {
-        format!("{}...", &state.media_title[..27])
+    } else if player.title.len() > 30 {
+        format!("{}...", &player.title[..27])
     } else {
-        state.media_title.clone()
+        player.title.clone()
     };
 
-    let artist_text = if state.media_artist.len() > 30 {
-        format!("{}...", &state.media_artist[..27])
+    let artist_text = if player.artist.len() > 30 {
+        format!("{}...", &player.artist[..27])
     } else {
-        state.media_artist.clone()
+        player.artist.clone()
     };
 
-    let art: Element<'static, Message> = if !state.media_thumbnail.is_empty() {
-        container(text("♪".to_string()).size(20).color(sub_text_color()))
+    let art: Element<'static, Message> = if let Some(handle) = thumbnail_handle {
+        iced::widget::image(handle.clone())
             .width(48)
             .height(48)
-            .center_x(48)
-            .center_y(48)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.2, 0.2, 0.2, 1.0))),
-                border: iced::Border {
-                    radius: 4.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
             .into()
     } else {
         container(text("♪".to_string()).size(20).color(sub_text_color()))
@@ -410,6 +404,10 @@ pub(crate) fn media_control_card(state: &crate::app::State) -> Element<'static, 
     let info_row = row![art, text_col, Space::new().width(Length::Fill)]
         .spacing(10)
         .align_y(iced::Alignment::Center);
+
+    let pid = player.id.clone();
+    let pid2 = player.id.clone();
+    let pid3 = player.id.clone();
 
     fn transport_btn(icon: lucide_icons::Icon, msg: Message, size: f32) -> Element<'static, Message> {
         let icon_char: char = icon.into();
@@ -444,16 +442,16 @@ pub(crate) fn media_control_card(state: &crate::app::State) -> Element<'static, 
             .into()
     }
 
-    let play_icon = if state.media_is_playing {
+    let play_icon = if player.is_playing {
         lucide_icons::Icon::Pause
     } else {
         lucide_icons::Icon::Play
     };
 
     let controls = row![
-        transport_btn(lucide_icons::Icon::SkipBack, Message::MediaPrevTrack, 14.0),
-        transport_btn(play_icon, Message::MediaTogglePlay, 16.0),
-        transport_btn(lucide_icons::Icon::SkipForward, Message::MediaNextTrack, 14.0),
+        transport_btn(lucide_icons::Icon::SkipBack, Message::MediaPrevTrack(pid), 14.0),
+        transport_btn(play_icon, Message::MediaTogglePlay(pid2), 16.0),
+        transport_btn(lucide_icons::Icon::SkipForward, Message::MediaNextTrack(pid3), 14.0),
     ]
     .spacing(15)
     .align_y(iced::Alignment::Center);
@@ -466,7 +464,7 @@ pub(crate) fn media_control_card(state: &crate::app::State) -> Element<'static, 
     container(content)
         .padding(Padding::from([10, 10]))
         .width(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
+        .style(move |_theme: &Theme| container::Style {
             background: Some(iced::Background::Color(Color::from_rgba(0.15, 0.15, 0.15, 1.0))),
             border: iced::Border {
                 radius: 8.0.into(),
@@ -513,3 +511,5 @@ pub(crate) fn popup_inner_style(_theme: &Theme) -> container::Style {
         ..Default::default()
     }
 }
+
+
